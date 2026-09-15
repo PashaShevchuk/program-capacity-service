@@ -1,179 +1,129 @@
 # Assumptions and trade-offs
 
-Where the brief left room for interpretation, this is what I chose. README
-explains how things work; this file is what I decided and what is missing.
+Where the brief left room for interpretation, this is what I chose. README says
+how things work; this says what I decided and what is missing.
 
-## Domain rules
+## Domain
 
 **An invoice holds at most one reservation per program, ever.** `(program_id,
 invoice_id)` is unique, which makes the reservation its own idempotency record.
-The cost: a released invoice cannot be financed again under the same program.
-Re-financing seemed less likely than a retried approval, and the retry is the
-case that corrupts capacity.
+The cost: a released invoice cannot be financed again under the same id.
 
-**Repeating a release is success, not an error.** Repayment notifications get
-retried, and an already-released reservation is the outcome the caller wanted.
-Cancelling something already released is still rejected — different outcomes.
+**Repeating a release is success, not an error** — repayment notifications get
+retried. Cancelling something already released is still rejected.
 
-**Lowering a limit below what is reserved is refused.** The alternative is a
-program reporting negative availability with no way to explain it.
+**Lowering a limit below what is reserved is refused.** Release first.
 
-**A program can be overcommitted, but only through treasury.** If a snapshot
-reports more reserved than the limit allows, the service accepts it and flags
-`overcommitted: true`; rejecting it would leave us permanently out of sync with
-the source of truth. So the database enforces `reserved >= 0` but deliberately
-not `reserved <= limit`. The API path can never produce an overcommit.
+**A program can be overcommitted, but only through treasury.** Its snapshots and
+events report what already happened, so refusing them would leave the two
+permanently out of step. The database enforces `reserved >= 0` but deliberately
+not `reserved <= limit`; the API path can never overcommit, and `overcommitted`
+is exposed on the capacity endpoint.
 
 ## Reconciliation
 
-**`asOf` is compared against local timestamps,** which assumes clocks are
-reasonably close. With clocks far apart, the honest fix is for the snapshot to
-carry treasury's own watermark for what it has received from us.
+**A snapshot listing `openReservations` is taken at its word,** and the balance
+becomes the sum of the reconciled rows. Those amounts are quoted in the
+program's currency, since the snapshot carries no rate to convert anything else
+with, and at most 2,000 per message, since each costs a write inside the program
+lock.
 
-**A local movement counts as unseen by timing, not by who created it.** A
-reservation opened after `asOf` is absent from the snapshot whoever opened it,
-and one the snapshot counts is gone whoever closed it.
-
-**The reserved total never drops below what the open rows hold.** `asOf` is
-treasury's clock and cannot say whether treasury has *received* a reservation
-accepted moments earlier, so the snapshot arithmetic is floored by the open
-rows. The cost is that a program can sit temporarily over-reserved; the
-alternative is handing the same capacity out twice. Removing this floor safely
-needs an acknowledgement watermark in the contract — treasury telling us which
-of our events it has taken in — rather than a timestamp.
-
-**A residual difference is recorded, not applied silently.** It becomes a ledger
-entry carrying both sides' figures.
-
-**`openReservations` is quoted in the program's own currency.** The snapshot
-carries no FX rate, so there would be nothing to convert a foreign amount with.
-A snapshot that breaks this is rejected rather than guessed at.
+**Without that list, timing decides what the snapshot has seen — and the total
+never drops below what the open rows hold.** `asOf` is treasury's clock and
+cannot say whether treasury has *received* a reservation accepted moments
+earlier. The floor can leave a program temporarily over-reserved; dropping below
+it would hand the same capacity out twice. Sending the list avoids the question.
 
 **A snapshot that still lists an invoice we have released leaves it closed.** We
-hold an explicit release for it and treasury has not caught up. Resurrecting a
-repaid invoice is the worse failure.
+hold explicit evidence of the release; resurrecting a repaid invoice is worse.
 
-**Incremental treasury reserves may overcommit a program.** They report what
-already happened at the source of truth, so refusing one would leave the two
-permanently out of step. A snapshot can overcommit a program for the same
-reason. The API path can never do it, and `overcommitted` is exposed on the
-capacity endpoint.
+**Restating an amount changes what is held, not what was agreed.** The invoice
+value and the rate frozen at approval stay as recorded; the previous figure goes
+to the reservation's metadata and the reason to the ledger.
 
-**Reconciliation closes a dropped reservation as `CANCELLED`.** A treasury
-release arriving afterwards is accepted as already applied rather than rejected
-as an invalid transition.
-
-**A sequence gap is not detected.** If a message is parked in the DLQ and a
-later one succeeds, the watermark moves past the gap and the parked message can
-no longer be replayed — it will be discarded as stale. Closing this properly
-needs a contract the producer takes part in: an expected-sequence field, or a
-watermark from treasury saying what it has received from us, so the service can
-tell a gap from a reordering. Building half of it here would give false
-confidence. Until then, recovery from a parked message goes through the next
-snapshot, which is why snapshots now rebuild reservation rows rather than only
-the total.
+**A sequence gap is not detected.** If a message is parked in the DLQ and a later
+one succeeds, the watermark moves past it and a replay is discarded as stale.
+Closing this needs the producer's help — an expected-sequence field, or a
+watermark saying what treasury has taken in from us. Until then recovery goes
+through the next snapshot, which is why snapshots rebuild rows and not just the
+total.
 
 ## Money and FX
 
-**Conversions round up.** Fractions of a minor unit go against the borrower, so
-repeated conversions can never manufacture capacity.
+**Conversions round up,** so repeated conversions cannot manufacture capacity.
 
-**Over-precise amounts are rejected, not rounded.** Turning a client's `10.005`
-into `10.01` would make our books disagree with theirs.
+**Over-precise amounts are rejected rather than rounded,** and only the
+currencies in `CURRENCY_EXPONENTS` are accepted.
 
-**Only the currencies listed in `CURRENCY_EXPONENTS` are accepted.** An unknown
-code is rejected rather than given an assumed two-decimal exponent.
-
-**Rates are seeded into `fx_rates`, standing in for the treasury rate feed.** A
-missing pair is a 409, not a guessed rate.
-
-**Rates are not cached.** The indexed lookup is cheap at this volume, and
-caching would need an invalidation story that is not worth inventing without a
-real provider.
+**Rates are seeded into `fx_rates`, standing in for the treasury feed.** A
+missing pair is a 409, not a guess. Nothing is cached: the lookup is cheap, and
+an invalidation story is not worth inventing without a real provider.
 
 ## Authentication
 
 **Local credentials with HS256 JWTs,** so the service runs with `docker compose
-up` and no external dependency. A real deployment replaces the users table with
-an identity provider, points `JwtStrategy` at its JWKS and moves to RS256. The
-seams are all inside `AuthModule`.
+up`. A real deployment swaps the users table for an identity provider and points
+`JwtStrategy` at its JWKS; the seams are inside `AuthModule`.
 
-**All routes are authenticated by default.** The global guard is opt-out via
-`@Public()`, so a forgotten decorator fails closed.
+**All routes are authenticated by default** — the global guard is opt-out via
+`@Public()`, so a forgotten decorator fails closed. `/healthz`, `/readyz` and
+`/metrics` are public, the last assuming it is not exposed outside the cluster.
 
-**Three coarse roles.** Admin manages programs and limits, client moves
-capacity, viewer reads. Per-program authorisation is not modelled; it would be
-the first thing to add for a multi-tenant deployment.
+**Three coarse roles.** Per-program authorisation is not modelled; it is the
+first thing to add for multi-tenancy.
 
-**The acting user is recorded on ledger entries, not on reservations.** The
-ledger already covers both taking and returning capacity. The label is
-snapshotted rather than joined, because an email can change later and the audit
-line should not change with it.
-
-**`/metrics` is unauthenticated,** assuming it is not exposed outside the
-cluster.
+**The acting user is recorded on ledger entries, not on reservations.** The label
+is snapshotted rather than joined, because an email can change later.
 
 ## Pagination
 
-**Cursor responses carry no total.** Avoiding `COUNT(*)` on an unbounded table
-is most of the reason to use a cursor. A client needing an exact count would
-need a separate endpoint.
+**Cursor responses carry no total** — avoiding `COUNT(*)` on an unbounded table
+is most of the reason to use a cursor.
 
-**Cursors are opaque but not signed.** They encode a timestamp and an id in
-base64. A crafted one only reads from a different point in a list the caller can
-already see. If cursors ever carried filter state, they would need signing.
+**Cursors are opaque but not signed.** A crafted one only reads from a different
+point in a list the caller can already see.
 
 ## Operational limits
 
-**Migrations run on boot.** Convenient for one instance; with several replicas
-this should become a deploy-time job so they do not race. Controlled by
-`DB_RUN_MIGRATIONS_ON_BOOT`.
+**Migrations run on boot.** With several replicas this belongs in a deploy job;
+controlled by `DB_RUN_MIGRATIONS_ON_BOOT`.
 
-**The SSE stream is per instance.** A client connected to one replica will not
-see changes applied by another. Cluster-wide delivery means consuming the
-`program.capacity.changed` topic the service already publishes. Kept simple
-because it is a convenience on top of the API, not the source of truth.
+**The SSE stream is per instance.** Cluster-wide delivery means consuming the
+`program.capacity.changed` topic the service already publishes.
 
-**The outbox publisher polls every second.** Fine at this volume; reading the
-WAL would be the next step if latency mattered.
+**The outbox publisher polls every second and holds its transaction across the
+Kafka write.** Fine at this volume; it costs lock time and can duplicate on a
+publish-then-rollback, which consumers already deduplicate on `eventId`.
 
 **Outbox rows that exhaust their retries are marked `FAILED` and kept** for an
-operator. There is no endpoint to replay them; that is worth adding.
+operator. There is no replay endpoint.
 
-**No rate limiting, CORS configuration or request size limits** beyond the
-defaults. Deployment concerns here, but real decisions before going live.
+**No retention on `processed_messages` or published outbox rows.** The inbox has
+to outlive the broker's replay window, which makes it a deployment decision.
+
+## Security not covered
+
+No Kafka TLS or SASL, no PostgreSQL SSL, no rate limiting on the token endpoint
+(login is constant-cost but unthrottled), and no CORS or request-size policy
+beyond the defaults.
+
+**Ledger append-only is a convention, not a grant.** Production would use a role
+without UPDATE or DELETE on that table.
+
+**`npm audit` is gated on production dependencies only,** which is clean. The
+full audit reports findings that reach the tree through Testcontainers and never
+ship.
 
 ## Testing
 
-**No test against a live broker.** Handlers are driven through
-`KafkaConsumerService.processMessage`, the same path `eachMessage` takes, so a
-broker would add start-up time and flakiness without covering more.
+**No test against a live broker.** Handlers run through
+`KafkaConsumerService.processMessage`, the same path `eachMessage` takes.
 `npm run simulate:treasury` exercises the real wiring by hand.
 
-**Integration tests start their own PostgreSQL container** rather than relying
-on a running compose stack, so they are self-contained and safe in CI.
-
-## Security not covered here
-
-**No TLS or SASL on Kafka, and no SSL on PostgreSQL.** Local development runs on
-a private network. Both are configuration rather than code changes, but they
-would be required before any real deployment.
-
-**No rate limiting on the token endpoint.** Login is constant-cost — a missing
-user is compared against a real bcrypt hash so it takes as long as a wrong
-password — but nothing limits how often it can be tried.
-
-**Ledger append-only is a convention, not a database grant.** The service never
-updates or deletes those rows, but the role it connects with could. A production
-deployment would use a role without UPDATE or DELETE on that table, or a trigger
-that refuses them.
-
-**No retention on `processed_messages` or published outbox rows.** Both grow
-without bound. The inbox has to be kept longer than the broker's replay window,
-which makes the retention period a deployment decision rather than a default.
+**Integration tests start their own PostgreSQL container,** so they are
+self-contained and safe in CI.
 
 ## Not built
 
 Multi-tenancy, per-program authorisation, partial releases, reservation expiry,
-fees or interest, an admin UI, and DLQ replay tooling. Each is a reasonable next
-step; none is needed to show the behaviour the brief asks for.
+fees or interest, an admin UI, and DLQ replay tooling.

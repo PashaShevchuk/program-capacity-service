@@ -123,6 +123,7 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
       openedLocallyAfterSnapshotMinor: local.opened,
       closedLocallyAfterSnapshotMinor: local.closed,
       openReservationsMinor,
+      detailAuthoritative: snapshot.openReservations !== undefined,
     });
 
     if (outcome.flooredToOpenRows) {
@@ -286,12 +287,16 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
   ): Promise<void> {
     const previous = reservation.reservedAmount;
 
-    reservation.invoiceAmountMinor = listedAmount.minorUnits;
-    reservation.invoiceCurrency = program.currency;
+    // Only what the program currently holds changes. The invoice's face value
+    // and the rate frozen when it was approved are the evidence for how the
+    // original figure was reached, and overwriting them would leave the
+    // reservation unable to explain itself.
     reservation.reservedAmountMinor = listedAmount.minorUnits;
-    reservation.fxRate = '1';
-    reservation.fxRateSource = 'RECONCILIATION';
-    reservation.fxRateAt = asOf;
+    reservation.metadata = {
+      ...reservation.metadata,
+      restatedBySnapshot: snapshot.sequence,
+      amountBeforeRestatement: previous.toDecimalString(),
+    };
     await manager.save(InvoiceReservationEntity, reservation);
 
     await this.ledger.append(manager, {

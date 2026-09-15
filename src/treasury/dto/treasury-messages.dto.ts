@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsEnum,
   IsISO8601,
@@ -8,12 +9,39 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  Matches,
   MaxLength,
+  Validate,
   ValidateNested,
+  ValidatorConstraint,
+  type ValidatorConstraintInterface,
 } from 'class-validator';
 
 import { NonNegativeMoneyDto, PositiveMoneyDto } from '../../common/money/constrained-money.dto';
+
+/** Cap on how many reservations one snapshot may carry. */
+export const MAX_OPEN_RESERVATIONS = 2000;
+
+/** Largest value a PostgreSQL `bigint` holds. */
+const MAX_SEQUENCE = 9_223_372_036_854_775_807n;
+
+@ValidatorConstraint({ name: 'isBigIntSequence' })
+class IsBigIntSequence implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    if (typeof value === 'number') {
+      // JSON.parse has already rounded it, so the original is unrecoverable.
+      if (!Number.isSafeInteger(value) || value < 0) return false;
+      return true;
+    }
+
+    if (typeof value !== 'string' || !/^\d{1,19}$/.test(value)) return false;
+
+    return BigInt(value) <= MAX_SEQUENCE;
+  }
+
+  defaultMessage(): string {
+    return 'sequence must be a non-negative integer within bigint range, sent as a string when above 2^53';
+  }
+}
 
 export enum TreasuryEventType {
   CapacityReserved = 'CapacityReserved',
@@ -35,10 +63,12 @@ export abstract class TreasuryEnvelopeDto {
    * Monotonic per program. Lets the service ignore a message that arrives after
    * a newer one, which Kafka allows across partitions.
    *
-   * Carried as a string as well as a number: the column is a `bigint`, and a
-   * JSON number loses precision past 2^53. `BigInt(sequence)` reads either.
+   * Read as a string, because the column is a `bigint` and `JSON.parse` has
+   * already rounded any number past 2^53 before this class ever sees it. A
+   * number is still accepted while it is exactly representable; beyond that the
+   * producer has to send a string or the value it meant is already lost.
    */
-  @Matches(/^\d{1,19}$/, { message: 'sequence must be a non-negative integer' })
+  @Validate(IsBigIntSequence)
   @Transform(({ value }: { value: unknown }) => String(value))
   sequence: string;
 
@@ -124,6 +154,9 @@ export class TreasuryReconciliationDto extends TreasuryEnvelopeDto {
    */
   @IsOptional()
   @IsArray()
+  // Each row costs a write and a ledger entry inside the program lock, so an
+  // unbounded list would hold the lock past the consumer's session timeout.
+  @ArrayMaxSize(MAX_OPEN_RESERVATIONS)
   @ValidateNested({ each: true })
   @Type(() => OpenReservationDto)
   openReservations?: OpenReservationDto[];

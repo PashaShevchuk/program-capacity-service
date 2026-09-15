@@ -26,7 +26,7 @@ export class MetricsService {
 
   readonly utilisation = new Gauge({
     name: 'capacity_utilisation_ratio',
-    help: 'Reserved divided by total limit, between 0 and 1',
+    help: 'Reserved divided by total limit; above 1 when treasury reports an overcommit',
     labelNames: ['program'] as const,
     registers: [this.registry],
   });

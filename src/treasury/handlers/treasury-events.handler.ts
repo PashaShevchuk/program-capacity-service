@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { type ConfigType } from '@nestjs/config';
 import { EntityManager } from 'typeorm';
 
-import { CurrencyMismatchError } from '../../common/errors/domain.errors';
+import { CurrencyMismatchError, MalformedMessageError } from '../../common/errors/domain.errors';
 import { MoneyDto } from '../../common/money/money.dto';
 import { kafkaConfig } from '../../config/configuration';
 import { KafkaHandlerRegistry } from '../../kafka/kafka-handler.registry';
@@ -37,6 +37,9 @@ import {
 } from '../dto/treasury-messages.dto';
 import { isStaleSequence } from '../reconciliation.calculator';
 import { parseMessageBody } from '../message-validation';
+
+/** Clock skew tolerated on a message's own timestamps. */
+const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 /**
  * Applies incremental capacity events from the treasury system: reservations
@@ -78,6 +81,15 @@ export class TreasuryEventsHandler implements KafkaMessageHandler, OnModuleInit 
     }
 
     const occurredAt = new Date(event.occurredAt);
+
+    // Reserve and release get this checked when they reach the reservation
+    // service; a limit change has no such path, and a future-dated one would
+    // sit in the ledger as evidence of something that has not happened.
+    if (occurredAt.getTime() > Date.now() + MAX_CLOCK_SKEW_MS) {
+      throw new MalformedMessageError(this.topic, [
+        `occurredAt ${event.occurredAt} is more than ${MAX_CLOCK_SKEW_MS}ms in the future`,
+      ]);
+    }
     const afterCommit = await this.applyEvent(manager, program, event, occurredAt, message.eventId);
 
     await this.programs.markTreasuryProgress(manager, program, sequence);

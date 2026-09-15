@@ -36,7 +36,7 @@ describe('reconciliation safety', () => {
       programCode: 'PRG-SAFE',
       sequence: 1,
       occurredAt: new Date().toISOString(),
-      asOf: new Date(Date.now() + 1000).toISOString(),
+      asOf: new Date().toISOString(),
       totalLimit: { amount: '1000.00', currency: 'USD' },
       reservedTotal: { amount: '0.00', currency: 'USD' },
       ...overrides,
@@ -135,6 +135,98 @@ describe('reconciliation safety', () => {
     );
 
     expect((await program()).reserved.toDecimalString()).toBe('500.00');
+  });
+
+  describe('when the snapshot carries detail', () => {
+    it('does not hold capacity for an invoice that is already released here', async () => {
+      const reservedAt = new Date(Date.now() - 120_000);
+      const asOf = new Date(Date.now() - 60_000);
+
+      await reservations.reserve({
+        programRef: 'PRG-SAFE',
+        invoiceId: 'INV-DONE',
+        amount: Money.fromDecimal('80.00', 'USD'),
+        source: ReservationSource.Api,
+        ledgerSource: LedgerEntrySource.Api,
+        actor: TEST_ACTOR,
+        occurredAt: reservedAt,
+      });
+      await reservations.release({
+        programRef: 'PRG-SAFE',
+        reservationRef: 'INV-DONE',
+        ledgerSource: LedgerEntrySource.Api,
+        actor: TEST_ACTOR,
+        occurredAt: new Date(Date.now() - 90_000),
+      });
+
+      // Treasury has not caught up and still lists it.
+      await consumer.processMessage(
+        snapshot({
+          asOf: asOf.toISOString(),
+          reservedTotal: { amount: '80.00', currency: 'USD' },
+          openReservations: [
+            { invoiceId: 'INV-DONE', amount: { amount: '80.00', currency: 'USD' } },
+          ],
+        }),
+      );
+
+      // The row stays closed, so holding 80 against it would block capacity
+      // that nothing can ever release.
+      expect(await openTotal()).toBe(0n);
+      expect((await program()).reserved.toDecimalString()).toBe('0.00');
+    });
+
+    it('counts an invoice the snapshot lists exactly once', async () => {
+      const asOf = new Date(Date.now() - 60_000);
+
+      // Opened after asOf, yet treasury already knows about it.
+      await reserve('INV-BOTH', '100.00');
+
+      await consumer.processMessage(
+        snapshot({
+          asOf: asOf.toISOString(),
+          reservedTotal: { amount: '100.00', currency: 'USD' },
+          openReservations: [
+            { invoiceId: 'INV-BOTH', amount: { amount: '100.00', currency: 'USD' } },
+          ],
+        }),
+      );
+
+      expect((await program()).reserved.toDecimalString()).toBe('100.00');
+      expect((await program()).reservedMinor).toBe(await openTotal());
+    });
+
+    it('restates the held amount without rewriting the invoice or its rate', async () => {
+      await reservations.reserve({
+        programRef: 'PRG-SAFE',
+        invoiceId: 'INV-EUR',
+        amount: Money.fromDecimal('100.00', 'EUR'),
+        source: ReservationSource.Api,
+        ledgerSource: LedgerEntrySource.Api,
+        actor: TEST_ACTOR,
+      });
+
+      await consumer.processMessage(
+        snapshot({
+          reservedTotal: { amount: '80.00', currency: 'USD' },
+          openReservations: [
+            { invoiceId: 'INV-EUR', amount: { amount: '80.00', currency: 'USD' } },
+          ],
+        }),
+      );
+
+      const row = await context.dataSource
+        .getRepository(InvoiceReservationEntity)
+        .findOneByOrFail({ invoiceId: 'INV-EUR' });
+
+      // What treasury holds changed; what the invoice was and what rate applied
+      // to it did not, and the audit depends on both staying put.
+      expect(row.reservedAmount.toDecimalString()).toBe('80.00');
+      expect(row.invoiceAmount.toDecimalString()).toBe('100.00');
+      expect(row.invoiceCurrency).toBe('EUR');
+      expect(row.fxRate).toBe('1.085000000000');
+      expect(row.fxRateSource).toBe('TEST');
+    });
   });
 
   it('parks a snapshot whose detail disagrees with its own total', async () => {

@@ -8,6 +8,7 @@ const base = {
   openedLocallyAfterSnapshotMinor: 0n,
   closedLocallyAfterSnapshotMinor: 0n,
   openReservationsMinor: 0n,
+  detailAuthoritative: false,
 };
 
 describe('reconcileCapacity', () => {
@@ -72,7 +73,49 @@ describe('reconcileCapacity', () => {
     expect(outcome.expectedReservedMinor).toBe(0n);
   });
 
-  describe('the open-rows floor', () => {
+  describe('when the snapshot listed its reservations', () => {
+    it('takes the reconciled rows as the whole answer', () => {
+      // The rows were rebuilt from the snapshot's own list, so the timestamp
+      // arithmetic would only count the same invoices a second time.
+      const outcome = reconcileCapacity({
+        ...base,
+        detailAuthoritative: true,
+        openReservationsMinor: 100_00n,
+        openedLocallyAfterSnapshotMinor: 100_00n,
+        currentReservedMinor: 100_00n,
+      });
+
+      expect(outcome.expectedReservedMinor).toBe(100_00n);
+      expect(outcome.hasDrift).toBe(false);
+    });
+
+    it('holds nothing for an invoice that is no longer open here', () => {
+      const outcome = reconcileCapacity({
+        ...base,
+        detailAuthoritative: true,
+        snapshotReservedMinor: 80_00n,
+        openReservationsMinor: 0n,
+        currentReservedMinor: 80_00n,
+      });
+
+      expect(outcome.expectedReservedMinor).toBe(0n);
+      expect(outcome.reservedAdjustmentMinor).toBe(-80_00n);
+    });
+
+    it('still picks up a limit change', () => {
+      const outcome = reconcileCapacity({
+        ...base,
+        detailAuthoritative: true,
+        snapshotLimitMinor: 2_000_000_00n,
+        openReservationsMinor: 400_000_00n,
+      });
+
+      expect(outcome.hasLimitChange).toBe(true);
+      expect(outcome.limitAdjustmentMinor).toBe(1_000_000_00n);
+    });
+  });
+
+  describe('the open-rows floor, used when there is no detail', () => {
     it('never reports less reserved than the open rows hold', () => {
       // Treasury has not received a reservation this service just accepted.
       const outcome = reconcileCapacity({

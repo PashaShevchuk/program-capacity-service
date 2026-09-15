@@ -45,8 +45,6 @@ TOKEN=$(curl -s localhost:3000/v1/auth/token \
   -H 'content-type: application/json' \
   -d '{"email":"admin@demo.local","password":"Admin123!"}' | jq -r .accessToken)
 
-curl -s localhost:3000/v1/programs/PRG-USD-001/capacity -H "Authorization: Bearer $TOKEN"
-
 # a EUR invoice against a USD program
 curl -s -X POST localhost:3000/v1/programs/PRG-USD-001/reservations \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
@@ -54,15 +52,10 @@ curl -s -X POST localhost:3000/v1/programs/PRG-USD-001/reservations \
   -d '{"invoiceId":"INV-1","amount":{"amount":"1000000.00","currency":"EUR"}}'
 ```
 
-For the Kafka side without a treasury system:
-
-```bash
-npm run simulate:treasury -- PRG-USD-001
-```
-
-It sends a snapshot, a duplicate of it, an out-of-order snapshot, a treasury
-reservation, a malformed message and a limit change — so you can watch
-deduplication, the sequence guard and the DLQ do their job.
+For the Kafka side without a treasury system, `npm run simulate:treasury --
+PRG-USD-001` sends a snapshot, a duplicate, an out-of-order one, a treasury
+reservation, a malformed message and a limit change — enough to watch
+deduplication, the sequence guard and the DLQ work.
 
 ## API
 
@@ -96,7 +89,7 @@ Errors are RFC 7807 `application/problem+json` with a stable `code`:
   "type": "https://docs.capacity.example/errors/INSUFFICIENT_CAPACITY",
   "title": "Insufficient capacity",
   "status": 409,
-  "detail": "Program PRG-USD-001 has 8915000.00 USD available, which is less than the requested 20000000.00 USD",
+  "detail": "Program PRG-USD-001 has 8915000.00 USD available, less than the requested 20000000.00 USD",
   "code": "INSUFFICIENT_CAPACITY",
   "requestId": "062f456b-0da8-452c-af2a-c71bd595e18c",
   "details": { "requestedAmount": "20000000.00", "availableAmount": "8915000.00" }
@@ -155,36 +148,32 @@ is retried with backoff first. Either way the partition keeps moving.
 
 ### Reconciliation keeps local work
 
-A snapshot is authoritative as at its `asOf`, but the service may have moved on:
-reservations treasury has not seen, and ones it still counts that we released.
-Overwriting with the raw total would drop the first and double-count the second.
+Correcting the total alone is not enough. If a reserve event was lost, the
+balance would be right while the reservation behind it was missing, and the
+later release would fail with `RESERVATION_NOT_FOUND` — that capacity is stuck.
+
+So when a snapshot lists `openReservations`, the rows are rebuilt from it:
+missing ones recreated, ones treasury no longer lists closed. The balance is
+then the sum of those rows. One list, one truth.
+
+Without that list there is only timing:
 
 ```
-expected = snapshot reserved
-         + opened here after asOf and still open
-         - the snapshot counts, but we have since closed
+expected = max(snapshot + opened after asOf - closed after asOf, open rows)
 ```
 
-Any remaining difference becomes a `RECONCILIATION_ADJUSTMENT` ledger entry
-with the snapshot's own figures attached, so a correction is visible.
+The floor matters because `asOf` is treasury's clock: it cannot say whether
+treasury has *received* a reservation accepted a moment earlier, and dropping
+below the open rows would hand that capacity out twice. Whether a movement is in
+the snapshot is decided by when it happened, not by who created the reservation.
 
-Correcting the total is not enough on its own. If the reserve event for an
-invoice was lost, the balance would be right while the reservation behind it
-was missing — and the later release would fail with `RESERVATION_NOT_FOUND`,
-leaving that capacity stuck. So when the snapshot lists `openReservations`, the
-rows are reconciled too: missing ones are recreated, ones treasury no longer
-lists are closed. Those row changes carry no capacity delta of their own, so the
-balance still has exactly one source of truth.
+Any difference becomes a `RECONCILIATION_ADJUSTMENT` ledger entry carrying both
+sides' figures, so a correction is visible.
 
-Whether a local movement is in the snapshot is decided by **when it happened**,
-not by who created the reservation. A treasury reservation released through this
-API is the case that a `source` filter gets wrong in both directions.
-
-Messages carry a `sequence` that is monotonic per program; anything at or below
-the sequence already applied is discarded, because Kafka only orders within a
-partition. A higher sequence does not have to describe a later state, so a
-snapshot whose `asOf` precedes the one already applied is rejected as well. The
-arithmetic is a pure function, `reconcileCapacity`, unit-tested on its own.
+Messages carry a per-program `sequence`; anything at or below the one applied is
+discarded, since Kafka only orders within a partition. A higher sequence need
+not describe a later state, so a snapshot whose `asOf` precedes the applied one
+is rejected too. The arithmetic is a pure function, `reconcileCapacity`.
 
 ### Events are published through an outbox
 
@@ -198,9 +187,10 @@ consumers to deduplicate on.
 `/programs` uses offsets: short list, unique sort key.
 
 The ledger and the reservation list grow at the head and are read newest first,
-so offsets are wrong twice over — rows shift down as new ones arrive, and the
-sort timestamps are not unique, which lets the database return tied rows in any
-order. Both use a cursor on the row value `(timestamp, id)`:
+so offsets are wrong twice over: rows shift down as new ones arrive, and the
+sort timestamps are not unique, which lets tied rows come back in any order.
+Both use a cursor on the row value `(timestamp, id)`, returning `nextCursor` and
+`hasMore` instead of a total:
 
 ```sql
 WHERE program_id = $1 AND (created_at, id) < ($2, $3)
@@ -208,11 +198,9 @@ ORDER BY created_at DESC, id DESC
 LIMIT $4
 ```
 
-The response carries `nextCursor` and `hasMore` instead of a total.
-
-These columns are `timestamptz(3)`. PostgreSQL stores microseconds and a
-JavaScript `Date` cannot hold them, so a cursor built from the truncated value
-skipped rows — a test caught it.
+Those columns are `timestamptz(3)`: PostgreSQL stores microseconds, a JavaScript
+`Date` cannot, and a cursor built from the truncated value skipped rows until a
+test caught it.
 
 ### Everything is auditable
 
@@ -249,15 +237,18 @@ message id behind it. Nothing updates or deletes rows there.
   "occurredAt": "2026-09-15T10:00:00.000Z",
   "asOf": "2026-09-15T09:59:00.000Z",
   "totalLimit": { "amount": "12000000.00", "currency": "USD" },
-  "reservedTotal": { "amount": "2000000.00", "currency": "USD" }
+  "reservedTotal": { "amount": "2000000.00", "currency": "USD" },
+  "openReservations": [
+    { "invoiceId": "TR-A", "amount": { "amount": "2000000.00", "currency": "USD" } }
+  ]
 }
 ```
 
-`openReservations` is optional and quoted in the program's own currency. Leaving
-it out means the snapshot says nothing about individual rows; sending it empty
-means treasury holds nothing open, and local treasury rows are closed. When it
-is present it must list each invoice once and sum to `reservedTotal` — a
-snapshot that contradicts itself is parked in the DLQ rather than half-applied.
+`openReservations` is optional, quoted in the program's own currency, and capped
+at 2,000 entries. Omitted, it says nothing about individual rows; empty, it says
+treasury holds none. When present it must list each invoice once and sum to
+`reservedTotal`, or the snapshot is parked in the DLQ rather than half-applied.
+`sequence` is a `bigint`; send it as a string above 2^53.
 
 **`program.capacity.changed.v1`** (published) — keyed by program id, carrying
 the new limit, reserved and available amounts, the program `version` and the
@@ -275,44 +266,44 @@ npm run test:integration   # starts a PostgreSQL container per suite
 npm test                   # both
 ```
 
-116 tests. Unit tests cover money arithmetic and precision, currency conversion
-and rounding, the reservation state machine, the reconciliation arithmetic
-including its safety floor, and the rule that a message which cannot be parked
-in the DLQ must not have its offset committed.
+123 tests. Unit tests cover money arithmetic and precision, currency conversion
+and rounding, the reservation state machine, the reconciliation arithmetic, and
+the rule that a message which cannot be parked in the DLQ keeps its offset.
 
-Four integration suites cover what unit tests cannot prove, on a real database:
+Five integration suites cover what unit tests cannot prove, on a real database:
 
 - **concurrency** — 50 simultaneous reservations against a limit that fits 33;
-  interleaved reserves and releases; one ledger entry per reservation with no
-  gaps or repeats in the running balance;
-- **HTTP** — authentication, roles, cross-currency reservations, idempotent
-  retries and the rejection of a key reused for a different amount, duplicate
-  invoices, insufficient capacity, precision and range rules, backdated
-  releases, release and cancel, limit changes, and the audit trail naming the
-  acting user;
-- **treasury messages** — snapshots, deduplicated redeliveries, out-of-order
-  sequences and out-of-order `asOf`, local reservations surviving a snapshot,
-  released ones not coming back, rows recreated and closed from a snapshot, a
-  treasury reservation released through the API not being double-counted, and
-  malformed payloads failing permanently;
-- **pagination** — every entry served exactly once, entries sharing a timestamp
-  not lost, pages staying stable while new rows are written.
+  interleaved reserves and releases; one ledger entry each, with no gaps or
+  repeats in the running balance;
+- **HTTP** — authentication and roles, cross-currency reservations, idempotent
+  retries and keys reused for a different request, duplicate invoices,
+  insufficient capacity, precision and range rules, release, cancel, limit
+  changes, and the audit trail naming the acting user;
+- **treasury messages** — deduplicated redeliveries, out-of-order sequences and
+  `asOf`, rows recreated and closed from a snapshot, a treasury reservation
+  released through the API not double-counted, and malformed payloads failing
+  permanently;
+- **pagination** — every entry served once, entries sharing a timestamp not
+  lost, pages stable while new rows are written;
+- **reconciliation safety** — the balance never falling below the open rows,
+  the capacity that would free not being reservable twice, an invoice the
+  snapshot lists counted once, and a restated amount leaving the invoice and its
+  frozen rate untouched.
 
-There is no test against a live broker: handlers are driven through
-`KafkaConsumerService.processMessage`, the same path `eachMessage` takes.
+There is no test against a live broker: handlers run through
+`KafkaConsumerService.processMessage`, the same path `eachMessage` takes, and
 `npm run simulate:treasury` exercises the real wiring.
 
 ## Operations
 
 - `GET /healthz` — liveness, touches nothing
 - `GET /readyz` — readiness, pings the database
-- `GET /metrics` — Prometheus: reservation outcomes, available capacity and
-  utilisation per program, Kafka message outcomes and processing time. The
-  per-program gauges appear once that program's capacity first moves, and
-  utilisation can exceed 1 if treasury reports an overcommitted program
-- JSON logs with a request id on every line, taken from `x-request-id`. The same
-  id lands on ledger entries, so a capacity movement traces back to the request
-  that caused it. Authorization headers and passwords are redacted.
+- `GET /metrics` — Prometheus: reservation outcomes, capacity and utilisation
+  per program, Kafka message outcomes and timings. Per-program gauges appear
+  once that program first moves, and utilisation exceeds 1 on an overcommit
+- JSON logs carrying the `x-request-id` on every line. The same id lands on
+  ledger entries, so a capacity movement traces back to the request behind it.
+  Authorization headers and passwords are redacted.
 
 ## Layout
 
@@ -336,6 +327,4 @@ scripts/         treasury simulator
 `Money`, `convertMoney` and `reconcileCapacity` are plain TypeScript with no
 framework, which is why they are the easiest parts to test.
 
-## Assumptions and trade-offs
-
-See [ASSUMPTIONS.md](ASSUMPTIONS.md).
+Assumptions and trade-offs are in [ASSUMPTIONS.md](ASSUMPTIONS.md).

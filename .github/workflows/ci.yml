@@ -35,6 +35,11 @@ jobs:
       - name: Integration tests
         run: npm run test:integration
 
+      # Production dependencies only: the test stack pulls in advisories through
+      # Testcontainers that never reach the shipped image.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Build
         run: npm run build
 

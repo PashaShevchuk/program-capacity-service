@@ -22,6 +22,11 @@ export interface ReconciliationInput {
   closedLocallyAfterSnapshotMinor: bigint;
   /** Everything still open locally, after the rows have been reconciled. */
   openReservationsMinor: bigint;
+  /**
+   * True when the snapshot listed its reservations and the list passed
+   * validation, so the reconciled rows are the whole picture.
+   */
+  detailAuthoritative: boolean;
 }
 
 export interface ReconciliationOutcome {
@@ -40,18 +45,41 @@ export interface ReconciliationOutcome {
 }
 
 export function reconcileCapacity(input: ReconciliationInput): ReconciliationOutcome {
+  const limitAdjustmentMinor = input.snapshotLimitMinor - input.currentLimitMinor;
+
+  /*
+   * A snapshot that lists its reservations has already told us everything it
+   * holds, and the rows have been rebuilt from that list. Adding the timestamp
+   * arithmetic on top would count the same invoice twice — once because the
+   * snapshot listed it, once because it was opened after `asOf` — or hold
+   * capacity for an invoice we have released and treasury has not caught up on.
+   * With detail, the reconciled rows are the answer.
+   */
+  if (input.detailAuthoritative) {
+    const reservedAdjustment = input.openReservationsMinor - input.currentReservedMinor;
+
+    return {
+      expectedReservedMinor: input.openReservationsMinor,
+      reservedAdjustmentMinor: reservedAdjustment,
+      limitAdjustmentMinor,
+      hasDrift: reservedAdjustment !== 0n,
+      hasLimitChange: limitAdjustmentMinor !== 0n,
+      flooredToOpenRows: false,
+    };
+  }
+
   const expectedRaw =
     input.snapshotReservedMinor +
     input.openedLocallyAfterSnapshotMinor -
     input.closedLocallyAfterSnapshotMinor;
 
   /*
-   * The reserved total may never fall below what the open reservations add up
-   * to. `asOf` is treasury's clock, and it cannot say whether treasury has
-   * *received* a reservation this service accepted just before it — so a
-   * reservation made at 10:00:00 and a snapshot taken at 10:00:01 that has not
-   * seen it yet would otherwise wipe it from the balance while its row stayed
-   * open, and the freed capacity could be handed out a second time.
+   * Without detail, timing is all there is — and `asOf` is treasury's clock, so
+   * it cannot say whether treasury has *received* a reservation this service
+   * accepted just before it. A reservation made at 10:00:00 and a snapshot
+   * taken at 10:00:01 that has not seen it would otherwise wipe it from the
+   * balance while its row stayed open, and that capacity could be handed out
+   * twice. So the total never falls below what the open rows hold.
    *
    * Holding the floor can leave the program temporarily over-reserved, which
    * costs availability. Dropping below it costs money.
@@ -59,14 +87,11 @@ export function reconcileCapacity(input: ReconciliationInput): ReconciliationOut
   const floor = input.openReservationsMinor > 0n ? input.openReservationsMinor : 0n;
   const expectedReservedMinor = expectedRaw > floor ? expectedRaw : floor;
 
-  const reservedAdjustmentMinor = expectedReservedMinor - input.currentReservedMinor;
-  const limitAdjustmentMinor = input.snapshotLimitMinor - input.currentLimitMinor;
-
   return {
     expectedReservedMinor,
-    reservedAdjustmentMinor,
+    reservedAdjustmentMinor: expectedReservedMinor - input.currentReservedMinor,
     limitAdjustmentMinor,
-    hasDrift: reservedAdjustmentMinor !== 0n,
+    hasDrift: expectedReservedMinor !== input.currentReservedMinor,
     hasLimitChange: limitAdjustmentMinor !== 0n,
     flooredToOpenRows: expectedRaw < floor,
   };

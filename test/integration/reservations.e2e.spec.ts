@@ -328,6 +328,30 @@ describe('reservations over HTTP', () => {
       expect(response.body.code).toBe('INVALID_TIMESTAMP');
     });
 
+    it('returns the capacity when a reservation is cancelled', async () => {
+      const cancelled = await api()
+        .post('/v1/programs/PRG-1/reservations/INV-REL/cancel')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .send({ reason: 'Approval withdrawn' })
+        .expect(200);
+
+      expect(cancelled.body.status).toBe('CANCELLED');
+      expect(cancelled.body.cancelledAt).not.toBeNull();
+
+      const capacity = await api()
+        .get('/v1/programs/PRG-1/capacity')
+        .set('Authorization', `Bearer ${clientToken}`);
+
+      expect(capacity.body.reserved.amount).toBe('0.00');
+
+      const ledger = await api()
+        .get('/v1/programs/PRG-1/ledger')
+        .set('Authorization', `Bearer ${clientToken}`);
+
+      expect(ledger.body.items[0].entryType).toBe('CANCEL');
+      expect(ledger.body.items[0].reservedDelta.amount).toBe('-108500.00');
+    });
+
     it('refuses to cancel a reservation that was already released', async () => {
       await api()
         .post('/v1/programs/PRG-1/reservations/INV-REL/release')
