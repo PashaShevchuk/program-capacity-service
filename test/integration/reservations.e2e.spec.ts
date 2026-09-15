@@ -374,5 +374,42 @@ describe('reservations over HTTP', () => {
         ledger.body.items.map((entry: { entryType: string }) => entry.entryType).sort(),
       ).toEqual(['RELEASE', 'RESERVE']);
     });
+
+    it('names the user behind every movement', async () => {
+      await api()
+        .post('/v1/programs/PRG-1/reservations')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .send({ invoiceId: 'INV-WHO', amount: { amount: '1000.00', currency: 'USD' } })
+        .expect(201);
+
+      const ledger = await api()
+        .get('/v1/programs/PRG-1/ledger')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .expect(200);
+
+      expect(ledger.body.items[0].actor).toMatchObject({
+        type: 'USER',
+        label: 'client@test.local',
+      });
+      expect(ledger.body.items[0].actor.id).toEqual(expect.any(String));
+    });
+
+    it('ties an entry back to the request that caused it', async () => {
+      const created = await api()
+        .post('/v1/programs/PRG-1/reservations')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .set('X-Request-Id', 'trace-me-123')
+        .send({ invoiceId: 'INV-TRACE', amount: { amount: '1000.00', currency: 'USD' } })
+        .expect(201);
+
+      expect(created.headers['x-request-id']).toBe('trace-me-123');
+
+      const ledger = await api()
+        .get('/v1/programs/PRG-1/ledger')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .expect(200);
+
+      expect(ledger.body.items[0].correlationId).toBe('trace-me-123');
+    });
   });
 });

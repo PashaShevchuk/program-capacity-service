@@ -5,7 +5,7 @@ import { CapacityLedgerEntryEntity } from '../../src/ledger/capacity-ledger-entr
 import { ProgramEntity } from '../../src/programs/program.entity';
 import { ReservationSource } from '../../src/reservations/invoice-reservation.entity';
 import { ReservationsService } from '../../src/reservations/reservations.service';
-import { createTestContext, type TestContext } from '../helpers/test-app';
+import { createTestContext, TEST_ACTOR, type TestContext } from '../helpers/test-app';
 
 describe('concurrent reservations', () => {
   let context: TestContext;
@@ -39,6 +39,7 @@ describe('concurrent reservations', () => {
           amount: each,
           source: ReservationSource.Api,
           ledgerSource: LedgerEntrySource.Api,
+          actor: TEST_ACTOR,
         }),
       ),
     );
@@ -72,6 +73,7 @@ describe('concurrent reservations', () => {
           amount: Money.fromDecimal('10000.00', 'USD'),
           source: ReservationSource.Api,
           ledgerSource: LedgerEntrySource.Api,
+          actor: TEST_ACTOR,
         }),
       ),
     );
@@ -114,6 +116,7 @@ describe('concurrent reservations', () => {
           amount: Money.fromDecimal('20000.00', 'USD'),
           source: ReservationSource.Api,
           ledgerSource: LedgerEntrySource.Api,
+          actor: TEST_ACTOR,
         }),
       ),
     );
@@ -127,6 +130,7 @@ describe('concurrent reservations', () => {
           programRef: 'PRG-MIX',
           reservationRef: `INV-${index}`,
           ledgerSource: LedgerEntrySource.Api,
+          actor: TEST_ACTOR,
         }),
       ),
       ...Array.from({ length: 5 }, (_, index) =>
@@ -136,6 +140,7 @@ describe('concurrent reservations', () => {
           amount: Money.fromDecimal('20000.00', 'USD'),
           source: ReservationSource.Api,
           ledgerSource: LedgerEntrySource.Api,
+          actor: TEST_ACTOR,
         }),
       ),
     ]);

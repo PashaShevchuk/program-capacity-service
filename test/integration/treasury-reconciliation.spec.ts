@@ -16,7 +16,7 @@ import {
   ReservationStatus,
 } from '../../src/reservations/invoice-reservation.entity';
 import { ReservationsService } from '../../src/reservations/reservations.service';
-import { createTestContext, type TestContext } from '../helpers/test-app';
+import { createTestContext, TEST_ACTOR, type TestContext } from '../helpers/test-app';
 
 const EVENTS_TOPIC = 'treasury.capacity.events.v1';
 const RECONCILIATION_TOPIC = 'treasury.capacity.reconciliation.v1';
@@ -136,6 +136,7 @@ describe('treasury messages', () => {
         amount: Money.fromDecimal('50000.00', 'USD'),
         source: ReservationSource.Api,
         ledgerSource: LedgerEntrySource.Api,
+        actor: TEST_ACTOR,
       });
 
       await consumer.processMessage(
@@ -164,6 +165,7 @@ describe('treasury messages', () => {
         amount: Money.fromDecimal('80000.00', 'USD'),
         source: ReservationSource.Api,
         ledgerSource: LedgerEntrySource.Api,
+        actor: TEST_ACTOR,
         occurredAt: reservedAt,
       });
 
@@ -171,6 +173,7 @@ describe('treasury messages', () => {
         programRef: 'PRG-T',
         reservationRef: 'INV-EARLY',
         ledgerSource: LedgerEntrySource.Api,
+        actor: TEST_ACTOR,
       });
 
       // The snapshot still counts that 80,000 as open.
@@ -204,6 +207,14 @@ describe('treasury messages', () => {
 
       const updated = await program();
       expect(updated.lastTreasurySequence).toBe(100n);
+    });
+
+    it('attributes the adjustment to the treasury system, not a user', async () => {
+      await consumer.processMessage(message(RECONCILIATION_TOPIC, snapshot()));
+
+      const [entry] = await context.dataSource.getRepository(CapacityLedgerEntryEntity).find();
+
+      expect(entry.actor).toEqual({ type: 'TREASURY', id: null, label: 'treasury' });
     });
 
     it('rejects a snapshot in the wrong currency', async () => {

@@ -223,9 +223,15 @@ Delivery is at least once, and consumers deduplicate on `eventId`.
 ### Everything that moves is auditable
 
 `capacity_ledger_entries` is append-only. Each row carries the delta, the
-balances it produced, who caused it, and the request or message id behind it.
-Nothing in the service updates or deletes a row there, so drift between the
-running total and the ledger is detectable rather than silent.
+balances it produced, the actor behind it — the authenticated user, or the
+treasury system — and the request or message id that caused it. Nothing in the
+service updates or deletes a row there, so drift between the running total and
+the ledger is detectable rather than silent.
+
+The actor is stored as a type, a stable id and a label snapshotted at the time.
+Emails and service names change; an audit record should still read the way it
+did when it was written. Authentication therefore does more here than return
+401 and 403: it is what puts a name against every movement of money.
 
 ---
 

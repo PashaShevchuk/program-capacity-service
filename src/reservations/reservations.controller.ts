@@ -23,6 +23,8 @@ import {
 } from '@nestjs/swagger';
 import { type Response } from 'express';
 
+import { type AuthenticatedUser } from '../auth/authenticated-user';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../auth/user.entity';
@@ -31,6 +33,7 @@ import { ProblemDetails } from '../common/http/problem-details';
 import { MoneyDto } from '../common/money/money.dto';
 import { PageDto, PaginationQueryDto } from '../common/pagination/pagination.dto';
 import { LedgerEntrySource } from '../ledger/capacity-ledger-entry.entity';
+import { userActor } from '../ledger/ledger-actor';
 import { CloseReservationDto, CreateReservationDto } from './dto/create-reservation.dto';
 import { ReservationDto } from './dto/reservation.dto';
 import { ReservationSource } from './invoice-reservation.entity';
@@ -60,6 +63,7 @@ export class ReservationsController {
   async reserve(
     @Param('programRef') programRef: string,
     @Body() body: CreateReservationDto,
+    @CurrentUser() user: AuthenticatedUser,
     @CorrelationId() correlationId: string,
     @Res({ passthrough: true }) response: Response,
     @Headers('idempotency-key') idempotencyKey?: string,
@@ -70,6 +74,7 @@ export class ReservationsController {
       amount: MoneyDto.toMoney(body.amount),
       source: ReservationSource.Api,
       ledgerSource: LedgerEntrySource.Api,
+      actor: userActor(user.id, user.email),
       idempotencyKey: idempotencyKey ?? null,
       externalReference: body.externalReference ?? null,
       correlationId,
@@ -123,12 +128,14 @@ export class ReservationsController {
     @Param('programRef') programRef: string,
     @Param('reservationRef') reservationRef: string,
     @Body() body: CloseReservationDto,
+    @CurrentUser() user: AuthenticatedUser,
     @CorrelationId() correlationId: string,
   ): Promise<ReservationDto> {
     const result = await this.reservations.release({
       programRef,
       reservationRef,
       ledgerSource: LedgerEntrySource.Api,
+      actor: userActor(user.id, user.email),
       correlationId,
       reason: body.reason ?? null,
       occurredAt: body.occurredAt ? new Date(body.occurredAt) : undefined,
@@ -148,12 +155,14 @@ export class ReservationsController {
     @Param('programRef') programRef: string,
     @Param('reservationRef') reservationRef: string,
     @Body() body: CloseReservationDto,
+    @CurrentUser() user: AuthenticatedUser,
     @CorrelationId() correlationId: string,
   ): Promise<ReservationDto> {
     const result = await this.reservations.cancel({
       programRef,
       reservationRef,
       ledgerSource: LedgerEntrySource.Api,
+      actor: userActor(user.id, user.email),
       correlationId,
       reason: body.reason ?? null,
       occurredAt: body.occurredAt ? new Date(body.occurredAt) : undefined,

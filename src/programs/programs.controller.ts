@@ -21,12 +21,15 @@ import {
 } from '@nestjs/swagger';
 import { map, type Observable } from 'rxjs';
 
+import { type AuthenticatedUser } from '../auth/authenticated-user';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../auth/user.entity';
 import { CorrelationId } from '../common/http/correlation-id.decorator';
 import { MoneyDto } from '../common/money/money.dto';
 import { PageDto, PaginationQueryDto } from '../common/pagination/pagination.dto';
+import { userActor } from '../ledger/ledger-actor';
 import { LedgerEntryDto } from '../ledger/dto/ledger-entry.dto';
 import { type CapacityChangedPayload } from './capacity-changed.event';
 import { CapacityEventsService } from './capacity-events.service';
@@ -65,12 +68,14 @@ export class ProgramsController {
   @ApiCreatedResponse({ type: ProgramDto })
   async create(
     @Body() body: CreateProgramDto,
+    @CurrentUser() user: AuthenticatedUser,
     @CorrelationId() correlationId: string,
   ): Promise<ProgramDto> {
     const program = await this.programs.create({
       code: body.code,
       name: body.name,
       totalLimit: MoneyDto.toMoney(body.totalLimit),
+      actor: userActor(user.id, user.email),
       correlationId,
     });
 
@@ -118,11 +123,13 @@ export class ProgramsController {
   async changeLimit(
     @Param('programRef') programRef: string,
     @Body() body: UpdateProgramLimitDto,
+    @CurrentUser() user: AuthenticatedUser,
     @CorrelationId() correlationId: string,
   ): Promise<ProgramDto> {
     const program = await this.programs.changeLimit({
       programRef,
       totalLimit: MoneyDto.toMoney(body.totalLimit),
+      actor: userActor(user.id, user.email),
       correlationId,
     });
 

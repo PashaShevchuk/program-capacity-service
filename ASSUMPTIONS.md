@@ -89,6 +89,12 @@ capacity, viewer reads. Per-program authorisation — who may touch which progra
 — is not modelled; it would be the first thing to add for a multi-tenant
 deployment.
 
+**The acting user is recorded on ledger entries, not on reservations.** The
+ledger is the audit record and already covers both taking and returning
+capacity, so a second copy on the reservation would be one more thing to keep in
+step. The label is snapshotted rather than joined, because an email can change
+after the fact and the audit line should not change with it.
+
 **`/metrics` is unauthenticated,** on the assumption that it is not exposed
 outside the cluster.
 

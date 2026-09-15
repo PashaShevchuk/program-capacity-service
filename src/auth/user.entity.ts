@@ -15,11 +15,6 @@ export enum UserRole {
   Viewer = 'viewer',
 }
 
-/**
- * An operator or service account that can call the API.
- * Local credentials keep the service runnable with just `docker compose up`;
- * in a real deployment this table gives way to an identity provider.
- */
 @Entity('users')
 export class UserEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -29,7 +24,6 @@ export class UserEntity {
   @Column({ type: 'varchar', length: 320 })
   email: string;
 
-  /** bcrypt hash. The plaintext never leaves the request handler. */
   @Column({ name: 'password_hash', type: 'varchar', length: 100 })
   passwordHash: string;
 

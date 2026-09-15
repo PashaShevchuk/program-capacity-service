@@ -7,7 +7,11 @@ import { DataSource } from 'typeorm';
 import { UserEntity, UserRole } from '../../src/auth/user.entity';
 import { Money } from '../../src/common/money';
 import { FxRateEntity } from '../../src/fx/fx-rate.entity';
+import { userActor } from '../../src/ledger/ledger-actor';
 import { ProgramEntity } from '../../src/programs/program.entity';
+
+/** Stands in for the authenticated caller when a test drives a service directly. */
+export const TEST_ACTOR = userActor('00000000-0000-4000-8000-000000000001', 'test@local');
 
 export interface TestContext {
   app: INestApplication;

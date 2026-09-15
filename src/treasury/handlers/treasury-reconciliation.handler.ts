@@ -13,6 +13,7 @@ import {
   type ParsedKafkaMessage,
 } from '../../kafka/kafka-message';
 import { LedgerEntrySource, LedgerEntryType } from '../../ledger/capacity-ledger-entry.entity';
+import { TREASURY_ACTOR } from '../../ledger/ledger-actor';
 import { LedgerService } from '../../ledger/ledger.service';
 import { OutboxService } from '../../outbox/outbox.service';
 import {
@@ -113,6 +114,7 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
       program,
       entryType: LedgerEntryType.ReconciliationAdjustment,
       source: LedgerEntrySource.TreasuryReconciliation,
+      actor: TREASURY_ACTOR,
       reservedDelta: outcome.reservedAdjustmentMinor,
       limitDelta: outcome.limitAdjustmentMinor,
       correlationId: message.eventId,

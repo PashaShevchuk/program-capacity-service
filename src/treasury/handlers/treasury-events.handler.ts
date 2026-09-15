@@ -12,6 +12,7 @@ import {
   type ParsedKafkaMessage,
 } from '../../kafka/kafka-message';
 import { LedgerEntrySource, LedgerEntryType } from '../../ledger/capacity-ledger-entry.entity';
+import { TREASURY_ACTOR } from '../../ledger/ledger-actor';
 import { LedgerService } from '../../ledger/ledger.service';
 import { ProgramCapacityRepository } from '../../programs/program-capacity.repository';
 import { type ProgramEntity } from '../../programs/program.entity';
@@ -91,6 +92,7 @@ export class TreasuryEventsHandler implements KafkaMessageHandler, OnModuleInit 
           amount: MoneyDto.toMoney(payload.amount),
           source: ReservationSource.Treasury,
           ledgerSource: LedgerEntrySource.TreasuryEvent,
+          actor: TREASURY_ACTOR,
           externalReference: payload.externalReference ?? null,
           correlationId,
           occurredAt,
@@ -108,6 +110,7 @@ export class TreasuryEventsHandler implements KafkaMessageHandler, OnModuleInit 
             programRef: program.id,
             reservationRef: payload.invoiceId,
             ledgerSource: LedgerEntrySource.TreasuryEvent,
+            actor: TREASURY_ACTOR,
             correlationId,
             occurredAt,
             reason: payload.reason ?? 'Released by the treasury system',
@@ -135,6 +138,7 @@ export class TreasuryEventsHandler implements KafkaMessageHandler, OnModuleInit 
           program,
           entryType: LedgerEntryType.LimitChange,
           source: LedgerEntrySource.TreasuryEvent,
+          actor: TREASURY_ACTOR,
           reservedDelta: 0n,
           limitDelta: delta,
           correlationId,

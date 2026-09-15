@@ -17,7 +17,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Exchange credentials for a bearer token' })
   @ApiOkResponse({ type: TokenResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid email or password' })
-  issueToken(@Body() credentials: LoginDto): Promise<TokenResponseDto> {
-    return this.auth.issueToken(credentials);
+  async issueToken(@Body() credentials: LoginDto): Promise<TokenResponseDto> {
+    return await this.auth.issueToken(credentials);
   }
 }

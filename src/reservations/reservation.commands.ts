@@ -1,5 +1,6 @@
-import { type Money } from '../common/money/money';
+import { type Money } from '../common/money';
 import { type LedgerEntrySource } from '../ledger/capacity-ledger-entry.entity';
+import { type LedgerActor } from '../ledger/ledger-actor';
 import { type ProgramEntity } from '../programs/program.entity';
 import {
   type InvoiceReservationEntity,
@@ -14,6 +15,8 @@ export interface ReserveCapacityCommand {
   amount: Money;
   source: ReservationSource;
   ledgerSource: LedgerEntrySource;
+  /** Who is approving the invoice. */
+  actor: LedgerActor;
   idempotencyKey?: string | null;
   externalReference?: string | null;
   correlationId?: string | null;
@@ -27,6 +30,7 @@ export interface CloseReservationCommand {
   /** Reservation id or invoice id. */
   reservationRef: string;
   ledgerSource: LedgerEntrySource;
+  actor: LedgerActor;
   correlationId?: string | null;
   occurredAt?: Date;
   reason?: string | null;

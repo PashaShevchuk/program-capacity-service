@@ -170,6 +170,7 @@ export class ReservationsService {
       program,
       entryType: LedgerEntryType.Reserve,
       source: command.ledgerSource,
+      actor: command.actor,
       reservedDelta: required.minorUnits,
       reservationId: reservation.id,
       correlationId: command.correlationId,
@@ -228,6 +229,7 @@ export class ReservationsService {
       entryType:
         target === ReservationStatus.Released ? LedgerEntryType.Release : LedgerEntryType.Cancel,
       source: command.ledgerSource,
+      actor: command.actor,
       reservedDelta: -returned.minorUnits,
       reservationId: reservation.id,
       correlationId: command.correlationId,

@@ -16,6 +16,7 @@ import {
   LedgerEntrySource,
   LedgerEntryType,
 } from '../ledger/capacity-ledger-entry.entity';
+import { type LedgerActor } from '../ledger/ledger-actor';
 import { LedgerService } from '../ledger/ledger.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { CAPACITY_CHANGED_EVENT_TYPE, buildCapacityChangedPayload } from './capacity-changed.event';
@@ -27,12 +28,14 @@ export interface CreateProgramCommand {
   code: string;
   name: string;
   totalLimit: Money;
+  actor: LedgerActor;
   correlationId?: string | null;
 }
 
 export interface ChangeLimitCommand {
   programRef: string;
   totalLimit: Money;
+  actor: LedgerActor;
   correlationId?: string | null;
   reason?: string | null;
 }
@@ -99,6 +102,7 @@ export class ProgramsService {
           program: saved,
           entryType: LedgerEntryType.LimitChange,
           source: LedgerEntrySource.Api,
+          actor: command.actor,
           reservedDelta: 0n,
           limitDelta: command.totalLimit.minorUnits,
           correlationId: command.correlationId,
@@ -155,6 +159,7 @@ export class ProgramsService {
         program: locked,
         entryType: LedgerEntryType.LimitChange,
         source: LedgerEntrySource.Api,
+        actor: command.actor,
         reservedDelta: 0n,
         limitDelta: delta,
         correlationId: command.correlationId,

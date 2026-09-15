@@ -1,7 +1,8 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
-import { Money } from '../common/money/money';
-import { bigintTransformer } from '../common/money/money.transformer';
+import { Money } from '../common/money';
+import { bigintTransformer } from '../common/money';
+import { type LedgerActor, LedgerActorType } from './ledger-actor';
 
 export enum LedgerEntryType {
   /** Capacity taken by an approved invoice. */
@@ -76,6 +77,16 @@ export class CapacityLedgerEntryEntity {
   @Column({ type: 'varchar', length: 500, nullable: true })
   reason: string | null;
 
+  @Column({ name: 'actor_type', type: 'varchar', length: 16, default: LedgerActorType.System })
+  actorType: LedgerActorType;
+
+  @Column({ name: 'actor_id', type: 'varchar', length: 128, nullable: true })
+  actorId: string | null;
+
+  /** How the actor was identified when the entry was written. */
+  @Column({ name: 'actor_label', type: 'varchar', length: 320, nullable: true })
+  actorLabel: string | null;
+
   /** HTTP request id or Kafka message id that caused this entry. */
   @Index('idx_ledger_correlation_id')
   @Column({ name: 'correlation_id', type: 'varchar', length: 128, nullable: true })
@@ -105,5 +116,9 @@ export class CapacityLedgerEntryEntity {
 
   get availableAfter(): Money {
     return this.limitAfter.subtract(this.reservedAfter);
+  }
+
+  get actor(): LedgerActor {
+    return { type: this.actorType, id: this.actorId, label: this.actorLabel };
   }
 }

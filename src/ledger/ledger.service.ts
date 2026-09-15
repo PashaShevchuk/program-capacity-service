@@ -7,12 +7,15 @@ import {
   type LedgerEntrySource,
   type LedgerEntryType,
 } from './capacity-ledger-entry.entity';
+import { type LedgerActor } from './ledger-actor';
 
 export interface AppendLedgerEntry {
   /** The program as it stands *after* the change was applied. */
   program: ProgramEntity;
   entryType: LedgerEntryType;
   source: LedgerEntrySource;
+  /** Who caused the movement. */
+  actor: LedgerActor;
   reservedDelta: bigint;
   limitDelta?: bigint;
   reservationId?: string | null;
@@ -37,6 +40,9 @@ export class LedgerService {
       reservedAfterMinor: entry.program.reservedMinor,
       limitAfterMinor: entry.program.totalLimitMinor,
       reason: entry.reason ?? null,
+      actorType: entry.actor.type,
+      actorId: entry.actor.id,
+      actorLabel: entry.actor.label,
       correlationId: entry.correlationId ?? null,
       occurredAt: entry.occurredAt ?? new Date(),
       metadata: entry.metadata ?? {},
