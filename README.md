@@ -1,19 +1,16 @@
 # Program Capacity & Invoice Reservation
 
-A service that tracks how much of a financing program's credit limit is still
-available, in real time.
+Tracks how much of a financing program's credit limit is still available, in
+real time.
 
-When an invoice is approved for early payment it reserves part of the limit.
-When the invoice is repaid, that amount is released. Capacity also moves through
-a Kafka feed from an external treasury system, which sends both incremental
-events and periodic full-state snapshots. Programs and invoices can be in
-different currencies.
-
----
+Approving an invoice for early payment reserves part of the limit; repaying it
+releases the amount back. Capacity also moves through a Kafka feed from an
+external treasury system, which sends both incremental events and periodic
+full-state snapshots. Programs and invoices can be in different currencies.
 
 ## Running it
 
-You need Docker and Node 20 or newer (`.nvmrc` pins 22).
+Needs Docker and Node 20+ (`.nvmrc` pins 22).
 
 ```bash
 cp .env.example .env
@@ -24,30 +21,24 @@ npm run seed
 npm run start:dev
 ```
 
-The service is then on <http://localhost:3000>, with Swagger at
-<http://localhost:3000/docs> and a Kafka UI at <http://localhost:8080>.
+Service on <http://localhost:3000>, Swagger at `/docs`, Kafka UI on `:8080`.
+To run everything in containers: `docker compose --profile app up --build`.
 
-To run everything in containers instead:
+### Seeded logins
 
-```bash
-docker compose --profile app up --build
-```
-
-### Seeded data
-
-| Email | Password | Role | Can do |
+| Email | Password | Role | Can |
 |---|---|---|---|
-| `admin@demo.local` | `Admin123!` | admin | everything, including creating programs and changing limits |
+| `admin@demo.local` | `Admin123!` | admin | everything, incl. creating programs and changing limits |
 | `client@demo.local` | `Client123!` | client | reserve, release, read |
 | `viewer@demo.local` | `Viewer123!` | viewer | read only |
 
-Two programs are seeded: `PRG-USD-001` with a $10,000,000 limit and
-`PRG-EUR-001` with €5,000,000, plus the FX rates they need.
+Also seeded: `PRG-USD-001` ($10,000,000), `PRG-EUR-001` (€5,000,000), and FX
+rates.
 
-### Trying it out
+### Trying it
 
-`requests.http` has a request for every endpoint, ready for the VS Code REST
-Client or the JetBrains HTTP client. In short:
+`requests.http` has a ready request for every endpoint (VS Code REST Client or
+JetBrains HTTP client). Or:
 
 ```bash
 TOKEN=$(curl -s localhost:3000/v1/auth/token \
@@ -56,24 +47,22 @@ TOKEN=$(curl -s localhost:3000/v1/auth/token \
 
 curl -s localhost:3000/v1/programs/PRG-USD-001/capacity -H "Authorization: Bearer $TOKEN"
 
-# A EUR invoice against a USD program
+# a EUR invoice against a USD program
 curl -s -X POST localhost:3000/v1/programs/PRG-USD-001/reservations \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -H 'Idempotency-Key: demo-1' \
   -d '{"invoiceId":"INV-1","amount":{"amount":"1000000.00","currency":"EUR"}}'
 ```
 
-To see the Kafka side without a treasury system:
+For the Kafka side without a treasury system:
 
 ```bash
 npm run simulate:treasury -- PRG-USD-001
 ```
 
-That publishes a snapshot, a duplicate of it, an out-of-order snapshot, a
-treasury reservation, a malformed message and a limit change, so you can watch
-deduplication, the sequence guard and the DLQ all do their job.
-
----
+It sends a snapshot, a duplicate of it, an out-of-order snapshot, a treasury
+reservation, a malformed message and a limit change — so you can watch
+deduplication, the sequence guard and the DLQ do their job.
 
 ## API
 
@@ -82,12 +71,12 @@ Everything under `/v1` needs a bearer token. `/healthz`, `/readyz` and
 
 | Method | Path | Role | Purpose |
 |---|---|---|---|
-| `POST` | `/v1/auth/token` | — | exchange credentials for a JWT |
+| `POST` | `/v1/auth/token` | — | credentials for a JWT |
 | `GET` | `/v1/programs` | any | list programs |
 | `POST` | `/v1/programs` | admin | create a program |
 | `GET` | `/v1/programs/:ref` | any | one program |
 | `GET` | `/v1/programs/:ref/capacity` | any | limit, reserved, available |
-| `GET` | `/v1/programs/:ref/capacity/stream` | any | server-sent stream of changes |
+| `GET` | `/v1/programs/:ref/capacity/stream` | any | SSE stream of changes |
 | `PATCH` | `/v1/programs/:ref/limit` | admin | change the credit limit |
 | `GET` | `/v1/programs/:ref/ledger` | any | audit trail, cursor-paged |
 | `POST` | `/v1/programs/:ref/reservations` | client, admin | reserve for an approved invoice |
@@ -96,11 +85,11 @@ Everything under `/v1` needs a bearer token. `/healthz`, `/readyz` and
 | `POST` | `/v1/programs/:ref/reservations/:ref/release` | client, admin | release after repayment |
 | `POST` | `/v1/programs/:ref/reservations/:ref/cancel` | client, admin | withdraw a reservation |
 
-`:ref` accepts either a UUID or a business code, so `PRG-USD-001` and
-`INV-2026-000123` work as well as ids.
+`:ref` takes a UUID or a business code, so `PRG-USD-001` and `INV-2026-000123`
+both work. The SSE stream is authenticated like everything else, and the browser
+`EventSource` cannot send headers — use a fetch-based reader, or `requests.http`.
 
-Errors are [RFC 7807](https://datatracker.ietf.org/doc/html/rfc7807)
-`application/problem+json` with a stable `code`:
+Errors are RFC 7807 `application/problem+json` with a stable `code`:
 
 ```json
 {
@@ -114,126 +103,91 @@ Errors are [RFC 7807](https://datatracker.ietf.org/doc/html/rfc7807)
 }
 ```
 
----
+## How it works
 
-## How the hard parts work
+### Capacity cannot be oversold
 
-### Capacity can never be oversold
-
-Two approvals arriving at the same moment must not both see the same
-availability and both succeed. Every capacity movement runs in one transaction
-that starts by taking a row lock on the program:
+Two approvals arriving at once must not both see the same availability and both
+succeed. Every capacity movement runs in one transaction that starts by locking
+the program row:
 
 ```sql
 SELECT * FROM programs WHERE code = $1 FOR UPDATE
 ```
 
-The check and the write then happen while no one else can touch that row. The
-update repeats the invariant in its `WHERE` clause as a second line of defence,
-and refuses to continue if it affects no rows.
+A conditional `UPDATE` would protect the balance alone, but a movement also
+writes a reservation, a ledger entry holding the resulting balances, and an
+outbox event. The lock gives all four one consistent view. Optimistic retries
+would work too, but turn into a retry storm on a busy program.
 
-Two other approaches would also be correct, and were rejected. An atomic
-conditional update — `UPDATE ... SET reserved = reserved + $1 WHERE reserved +
-$1 <= limit` — handles the balance on its own, but a capacity movement also
-writes a reservation, a ledger entry carrying the *resulting* balances, and an
-outbox event; the lock gives all four one consistent view without a second
-read. Optimistic concurrency with a version check works too, but under real
-contention on a single hot program it turns into a retry storm, and the retry
-loop is more code to get wrong than the lock.
+Only approvals for the same program are serialised, and programs are
+independent. `test/integration/capacity-concurrency.spec.ts` fires 50
+simultaneous reservations at a limit that fits 33 and asserts exactly 33
+succeed.
 
-Locking per program is the right granularity: programs are independent of each
-other, so this serialises only the approvals for one program. `test/integration/capacity-concurrency.spec.ts`
-fires 50 simultaneous reservations at a limit that fits 33 and asserts that
-exactly 33 succeed and the reserved total lands on the limit, never past it.
-
-### Money never drifts
+### Money and currencies
 
 Amounts are integer minor units in `bigint` columns, wrapped in a `Money` value
-object. No floating point is involved anywhere, and arithmetic between
-different currencies throws rather than silently coercing.
+object. No floating point anywhere, and mixing currencies throws.
 
-Amounts cross the wire as decimal strings (`"10000000.00"`), never as JSON
-numbers, so a client's parser cannot round them. An amount with more decimal
-places than the currency has is rejected rather than rounded: quietly turning a
-client's `10.005` into `10.01` would make our books disagree with theirs.
+On the wire amounts are decimal strings (`"10000000.00"`), never JSON numbers.
+More decimal places than the currency has is an error, not something to round.
 
-### The FX rate is frozen at reservation time
+A USD program can hold a EUR invoice. The amount is converted **once**, at
+reservation time, and the result plus the rate is stored on the reservation.
+Releasing returns that stored amount and never converts again — otherwise a
+rate that moved between approval and repayment would leave the program short or
+over.
 
-A program in USD can hold a reservation for an invoice in EUR. The invoice
-amount is converted once, when the reservation is made, and the resulting
-program-currency amount is stored on the reservation along with the rate, its
-source and its effective date.
-
-Releasing returns **exactly that stored amount**. It does not convert again. If
-it did, a rate that moved between approval and repayment would leave the
-program permanently short or permanently over — the kind of leak that only
-shows up months later in a reconciliation.
-
-Rates come from an `ExchangeRateProvider` port. The bundled adapter reads the
-`fx_rates` table, which is the local record of the treasury rate feed and is
-populated by the seed. Pointing the service at a live FX provider means binding
-a different implementation in `FxModule`; nothing else changes.
+Rates come from an `ExchangeRateProvider` port; the bundled adapter reads the
+`fx_rates` table.
 
 ### Kafka messages are applied exactly once
 
-Kafka delivers at least once, so the same message will sometimes arrive twice.
-Each consumed message is claimed by inserting a row into `processed_messages`
-**inside the same transaction** as the change it causes. A redelivery hits the
-unique constraint, the transaction rolls back, and capacity is not counted
-twice.
+Kafka delivers at least once. Each message is claimed by inserting a row into
+`processed_messages` **in the same transaction** as the change it causes, so a
+redelivery hits the unique constraint and the whole thing rolls back.
 
-Offsets are committed by hand after the message has either been applied or
-parked, so a crash mid-processing replays rather than loses.
+Offsets are committed by hand once a message is applied or parked. A validation
+or business error will fail the same way every time, so it goes straight to
+`<topic>.dlq` with the error and original offset in the headers; anything else
+is retried with backoff first. Either way the partition keeps moving.
 
-Failures are separated by kind. A validation or business error will fail the
-same way on every attempt, so it goes straight to `<topic>.dlq` with headers
-naming the error and the original offset. Anything else is retried with
-exponential backoff first. Either way the partition keeps moving.
+### Reconciliation keeps local work
 
-### Reconciliation does not throw away local work
-
-A snapshot is authoritative as at its `asOf` timestamp, but this service may
-have moved on since. It may have accepted reservations treasury has not seen,
-and released ones the snapshot still counts as open. Overwriting with the raw
-snapshot total would drop the first group and double-count the second.
+A snapshot is authoritative as at its `asOf`, but the service may have moved on:
+reservations treasury has not seen, and ones it still counts that we released.
+Overwriting with the raw total would drop the first and double-count the second.
 
 ```
 expected = snapshot reserved
-         + reservations opened here after asOf and still open
-         - reservations the snapshot counts that we have since closed
+         + opened here after asOf and still open
+         - the snapshot counts, but we have since closed
 ```
 
-Whatever difference remains between `expected` and the current total is applied
-as a `RECONCILIATION_ADJUSTMENT` entry in the ledger, with the snapshot's own
-figures in its metadata. A correction is visible, not silent.
+Any remaining difference becomes a `RECONCILIATION_ADJUSTMENT` ledger entry
+with the snapshot's own figures attached, so a correction is visible.
 
-Snapshots and events both carry a `sequence` that is monotonic per program.
-Kafka only orders within a partition, so anything at or below the sequence
-already applied is discarded. The arithmetic lives in a pure function,
-`reconcileCapacity`, which is unit-tested on its own.
+Messages carry a `sequence` that is monotonic per program; anything at or below
+the sequence already applied is discarded, because Kafka only orders within a
+partition. The arithmetic is a pure function, `reconcileCapacity`, unit-tested
+on its own.
 
-### Nothing is lost between the database and Kafka
+### Events are published through an outbox
 
-PostgreSQL and Kafka cannot share a transaction. Publishing inline leaves a
-window where capacity changed but the event vanished, or the reverse. Instead
-the event is written to `outbox_messages` in the same transaction, and a
-background publisher claims rows with `FOR UPDATE SKIP LOCKED` and sends them.
-Delivery is at least once, and consumers deduplicate on `eventId`.
+PostgreSQL and Kafka cannot share a transaction, so the event is written to
+`outbox_messages` alongside the change, and a background publisher claims rows
+with `FOR UPDATE SKIP LOCKED` and sends them. At least once, with `eventId` for
+consumers to deduplicate on.
 
-### Paging a list that grows while you read it
+### Paging lists that grow while you read them
 
-`/programs` is offset-paged: it is short, rarely changes, and sorts by a unique
-code, so "rows 50 to 99" means something.
+`/programs` uses offsets: short list, unique sort key.
 
-The ledger and the reservation list are not like that. Both are read newest
-first and both grow at the head, so an offset is wrong twice over. Rows shift
-down as new ones are written, and a client paging through silently misses
-entries. And the sort timestamps are not unique — concurrent writes land in the
-same millisecond, which leaves the database free to return tied rows in any
-order, so pages can overlap even with nothing being written.
-
-Both use a cursor instead. The comparison is on the row value
-`(timestamp, id)`, with the id breaking every tie:
+The ledger and the reservation list grow at the head and are read newest first,
+so offsets are wrong twice over — rows shift down as new ones arrive, and the
+sort timestamps are not unique, which lets the database return tied rows in any
+order. Both use a cursor on the row value `(timestamp, id)`:
 
 ```sql
 WHERE program_id = $1 AND (created_at, id) < ($2, $3)
@@ -241,35 +195,22 @@ ORDER BY created_at DESC, id DESC
 LIMIT $4
 ```
 
-The response carries `nextCursor` and `hasMore` rather than a total; dropping
-`COUNT(*)` on a table that grows without bound is half the point.
+The response carries `nextCursor` and `hasMore` instead of a total.
 
-One detail worth knowing, because the first version got it wrong and a test
-caught it: these timestamps are stored as `timestamptz(3)`. PostgreSQL keeps
-microseconds by default, a JavaScript `Date` cannot, and a cursor built from the
-truncated value skipped every row whose microseconds were not zero. Storing the
-precision the application can represent removes the mismatch.
+These columns are `timestamptz(3)`. PostgreSQL stores microseconds and a
+JavaScript `Date` cannot hold them, so a cursor built from the truncated value
+skipped rows — a test caught it.
 
-### Everything that moves is auditable
+### Everything is auditable
 
-`capacity_ledger_entries` is append-only. Each row carries the delta, the
-balances it produced, the actor behind it — the authenticated user, or the
-treasury system — and the request or message id that caused it. Nothing in the
-service updates or deletes a row there, so drift between the running total and
-the ledger is detectable rather than silent.
-
-The actor is stored as a type, a stable id and a label snapshotted at the time.
-Emails and service names change; an audit record should still read the way it
-did when it was written. Authentication therefore does more here than return
-401 and 403: it is what puts a name against every movement of money.
-
----
+`capacity_ledger_entries` is append-only: the delta, the balances it produced,
+who caused it (the authenticated user or the treasury system) and the request or
+message id behind it. Nothing updates or deletes rows there.
 
 ## Kafka contracts
 
-Consumed:
-
-**`treasury.capacity.events.v1`** — incremental changes
+**`treasury.capacity.events.v1`** (consumed) — `eventType` is
+`CapacityReserved`, `CapacityReleased` or `ProgramLimitChanged`:
 
 ```json
 {
@@ -280,17 +221,12 @@ Consumed:
   "occurredAt": "2026-09-15T10:00:00.000Z",
   "payload": {
     "invoiceId": "TR-77",
-    "amount": { "amount": "500000.00", "currency": "EUR" },
-    "externalReference": "TRS-77"
+    "amount": { "amount": "500000.00", "currency": "EUR" }
   }
 }
 ```
 
-`eventType` is one of `CapacityReserved`, `CapacityReleased`
-(`payload: { invoiceId, reason? }`) or `ProgramLimitChanged`
-(`payload: { totalLimit }`).
-
-**`treasury.capacity.reconciliation.v1`** — full state
+**`treasury.capacity.reconciliation.v1`** (consumed) — full state:
 
 ```json
 {
@@ -300,23 +236,16 @@ Consumed:
   "occurredAt": "2026-09-15T10:00:00.000Z",
   "asOf": "2026-09-15T09:59:00.000Z",
   "totalLimit": { "amount": "12000000.00", "currency": "USD" },
-  "reservedTotal": { "amount": "2000000.00", "currency": "USD" },
-  "openReservations": [{ "invoiceId": "TR-A", "amount": { "amount": "1200000.00", "currency": "USD" } }]
+  "reservedTotal": { "amount": "2000000.00", "currency": "USD" }
 }
 ```
 
-`openReservations` is optional and used only to cross-check `reservedTotal`; a
-mismatch is logged and the reported total is used.
+An optional `openReservations` array is used only to cross-check
+`reservedTotal`; a mismatch is logged and the reported total wins.
 
-Published:
-
-**`program.capacity.changed.v1`**, keyed by program id so one program's events
-stay ordered, carrying the new limit, reserved and available amounts, the
-program `version` and the reason for the change.
-
-Failed messages go to `<topic>.dlq`.
-
----
+**`program.capacity.changed.v1`** (published) — keyed by program id, carrying
+the new limit, reserved and available amounts, the program `version` and the
+reason. Failed messages go to `<topic>.dlq`.
 
 ## Tests
 
@@ -326,29 +255,26 @@ npm run test:integration   # starts a PostgreSQL container per suite
 npm test                   # both
 ```
 
-Unit tests cover the parts where the logic lives: money arithmetic and
-precision rules, currency conversion and rounding, the reservation state
-machine, and the reconciliation arithmetic.
+85 tests. Unit tests cover money arithmetic and precision, currency conversion
+and rounding, the reservation state machine and the reconciliation arithmetic.
 
-Integration tests cover what unit tests cannot prove, on a real database:
+Four integration suites cover what unit tests cannot prove, on a real database:
 
 - **concurrency** — 50 simultaneous reservations against a limit that fits 33;
-  also interleaved reserves and releases, and one ledger entry per reservation
-  with no gaps or repeats in the running balance;
+  interleaved reserves and releases; one ledger entry per reservation with no
+  gaps or repeats in the running balance;
 - **HTTP** — authentication, roles, cross-currency reservations, idempotent
   retries, duplicate invoices, insufficient capacity, precision rules, release
-  and cancel, limit changes, the audit trail;
+  and cancel, limit changes, and the audit trail naming the acting user;
 - **treasury messages** — snapshots, deduplicated redeliveries, out-of-order
   sequences, local reservations surviving a snapshot, released ones not coming
-  back, and malformed payloads failing permanently.
+  back, malformed payloads failing permanently;
+- **pagination** — every entry served exactly once, entries sharing a timestamp
+  not lost, pages staying stable while new rows are written.
 
-There is no test against a live broker. Handlers are driven through
-`KafkaConsumerService.processMessage`, which is the same deduplication and
-transaction path `eachMessage` uses, so a broker would add start-up time and
-flakiness without covering anything more. The wiring itself is exercised by
-`npm run simulate:treasury`.
-
----
+There is no test against a live broker: handlers are driven through
+`KafkaConsumerService.processMessage`, the same path `eachMessage` takes.
+`npm run simulate:treasury` exercises the real wiring.
 
 ## Operations
 
@@ -356,12 +282,9 @@ flakiness without covering anything more. The wiring itself is exercised by
 - `GET /readyz` — readiness, pings the database
 - `GET /metrics` — Prometheus: reservation outcomes, available capacity and
   utilisation per program, Kafka message outcomes and processing time
-- Logs are JSON with a request id on every line, propagated from
-  `x-request-id`; the same id lands on ledger entries, so a capacity movement
-  can be traced back to the request that caused it. Authorization headers and
-  passwords are redacted.
-
----
+- JSON logs with a request id on every line, taken from `x-request-id`. The same
+  id lands on ledger entries, so a capacity movement traces back to the request
+  that caused it. Authorization headers and passwords are redacted.
 
 ## Layout
 
@@ -379,13 +302,11 @@ src/
   treasury/      message contracts and handlers, reconciliation
   outbox/        transactional outbox and its publisher
   health/ metrics/
+scripts/         treasury simulator
 ```
 
-The layering is deliberate but not ceremonial: `Money`, `convertMoney` and
-`reconcileCapacity` are plain TypeScript with no framework in sight, which is
-why they are the easiest parts to test.
-
----
+`Money`, `convertMoney` and `reconcileCapacity` are plain TypeScript with no
+framework, which is why they are the easiest parts to test.
 
 ## Assumptions and trade-offs
 
