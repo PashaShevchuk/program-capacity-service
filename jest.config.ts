@@ -1,7 +1,7 @@
 import type { Config } from 'jest';
 
 const transform: Config['transform'] = {
-  '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json', isolatedModules: true }],
+  '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json' }],
 };
 
 const config: Config = {
