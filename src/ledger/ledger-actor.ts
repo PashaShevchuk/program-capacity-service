@@ -30,9 +30,3 @@ export const TREASURY_ACTOR: LedgerActor = {
   id: null,
   label: 'treasury',
 };
-
-export const SYSTEM_ACTOR: LedgerActor = {
-  type: LedgerActorType.System,
-  id: null,
-  label: null,
-};

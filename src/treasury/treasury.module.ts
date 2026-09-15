@@ -8,6 +8,7 @@ import { InvoiceReservationEntity } from '../reservations/invoice-reservation.en
 import { ReservationsModule } from '../reservations/reservations.module';
 import { TreasuryEventsHandler } from './handlers/treasury-events.handler';
 import { TreasuryReconciliationHandler } from './handlers/treasury-reconciliation.handler';
+import { ReservationRowReconciler } from './reservation-row.reconciler';
 
 @Module({
   imports: [
@@ -17,6 +18,6 @@ import { TreasuryReconciliationHandler } from './handlers/treasury-reconciliatio
     LedgerModule,
     OutboxModule,
   ],
-  providers: [TreasuryEventsHandler, TreasuryReconciliationHandler],
+  providers: [TreasuryEventsHandler, TreasuryReconciliationHandler, ReservationRowReconciler],
 })
 export class TreasuryModule {}

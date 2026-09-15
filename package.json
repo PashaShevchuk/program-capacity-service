@@ -2,6 +2,11 @@
   "name": "program-capacity-service",
   "version": "1.0.0",
   "description": "Program Capacity & Invoice Reservation service",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PashaShevchuk/program-capacity-service.git"
+  },
+  "author": "Pavlo Shevchuk",
   "private": true,
   "license": "MIT",
   "engines": {
