@@ -24,6 +24,12 @@ export class KafkaConsumerService implements OnApplicationBootstrap, OnApplicati
   private readonly logger = new Logger(KafkaConsumerService.name);
   private consumer?: Consumer;
   private stopping = false;
+  private crashed = false;
+
+  /** False once the consumer has stopped for a reason it cannot recover from. */
+  get isConsuming(): boolean {
+    return !this.client.enabled || (!this.crashed && this.consumer !== undefined);
+  }
 
   constructor(
     private readonly client: KafkaClientService,
@@ -43,6 +49,16 @@ export class KafkaConsumerService implements OnApplicationBootstrap, OnApplicati
     this.consumer = this.client.kafka.consumer({
       groupId: this.config.consumerGroupId,
       sessionTimeout: 30_000,
+    });
+
+    // A crash that KafkaJS will not restart stops consumption for good. Without
+    // this the service would go on answering /readyz while the feed was dead.
+    this.consumer.on(this.consumer.events.CRASH, ({ payload }) => {
+      this.crashed = !payload.restart;
+      this.logger.error(
+        { err: payload.error, restarting: payload.restart },
+        'Kafka consumer crashed',
+      );
     });
 
     await this.consumer.connect();

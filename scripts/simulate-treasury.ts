@@ -41,16 +41,17 @@ async function main(): Promise<void> {
     });
   };
 
-  const envelope = (sequence: number) => ({
+  const base = Date.now();
+  const envelope = (offset: number) => ({
     eventId: randomUUID(),
     programCode,
-    sequence,
+    sequence: String(base + offset),
     occurredAt: new Date().toISOString(),
   });
 
-  log(`1. Full reconciliation snapshot: limit 12,000,000 and 2,000,000 reserved`);
+  log('1. Full reconciliation snapshot: limit 12,000,000 and 2,000,000 reserved');
   const snapshot = {
-    ...envelope(1000),
+    ...envelope(0),
     asOf: new Date().toISOString(),
     totalLimit: { amount: '12000000.00', currency: 'USD' },
     reservedTotal: { amount: '2000000.00', currency: 'USD' },
@@ -70,7 +71,7 @@ async function main(): Promise<void> {
   await send(RECONCILIATION, {
     ...snapshot,
     eventId: randomUUID(),
-    sequence: 999,
+    sequence: String(base - 1),
     totalLimit: { amount: '1.00', currency: 'USD' },
     reservedTotal: { amount: '0.00', currency: 'USD' },
   });
@@ -78,7 +79,7 @@ async function main(): Promise<void> {
 
   log('4. A reservation made in the treasury system, in EUR');
   await send(EVENTS, {
-    ...envelope(1001),
+    ...envelope(1),
     eventType: 'CapacityReserved',
     payload: {
       invoiceId: `TR-${Date.now()}`,
@@ -90,7 +91,7 @@ async function main(): Promise<void> {
 
   log('5. A malformed message: must land in the DLQ without blocking the partition');
   await send(EVENTS, {
-    ...envelope(1002),
+    ...envelope(2),
     eventType: 'CapacityReserved',
     payload: { invoiceId: '', amount: { amount: 'not-a-number', currency: 'XXX' } },
   });
@@ -98,7 +99,7 @@ async function main(): Promise<void> {
 
   log('6. A valid limit change after the bad message: must still be applied');
   await send(EVENTS, {
-    ...envelope(1003),
+    ...envelope(3),
     eventType: 'ProgramLimitChanged',
     payload: { totalLimit: { amount: '15000000.00', currency: 'USD' } },
   });

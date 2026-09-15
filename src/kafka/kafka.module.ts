@@ -10,6 +10,6 @@ import { ProcessedMessageEntity } from './processed-message.entity';
 @Module({
   imports: [TypeOrmModule.forFeature([ProcessedMessageEntity])],
   providers: [KafkaClientService, KafkaHandlerRegistry, KafkaConsumerService],
-  exports: [KafkaClientService, KafkaHandlerRegistry],
+  exports: [KafkaClientService, KafkaHandlerRegistry, KafkaConsumerService],
 })
 export class KafkaModule {}

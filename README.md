@@ -254,6 +254,10 @@ treasury holds none. When present it must list each invoice once and sum to
 the new limit, reserved and available amounts, the program `version` and the
 reason.
 
+Batches may arrive gzip- or Snappy-compressed. KafkaJS reads gzip on its own;
+Snappy is registered explicitly, because an unknown codec does not fail one
+message, it stops the consumer. `/readyz` reports a consumer that has stopped.
+
 Consumed messages that cannot be applied go to `<topic>.dlq`. Outbound events
 are different: they sit in `outbox_messages` until they are published, and a row
 that exhausts its retries is marked `FAILED` and left for an operator.
@@ -298,7 +302,8 @@ There is no test against a live broker: handlers run through
 ## Operations
 
 - `GET /healthz` — liveness, touches nothing
-- `GET /readyz` — readiness, pings the database
+- `GET /readyz` — readiness: pings the database and reports whether the Kafka
+  consumer is still running
 - `GET /metrics` — Prometheus: reservation outcomes, capacity and utilisation
   per program, Kafka message outcomes and timings. Per-program gauges appear
   once that program first moves, and utilisation exceeds 1 on an overcommit

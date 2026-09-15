@@ -101,6 +101,11 @@ operator. There is no replay endpoint.
 **No retention on `processed_messages` or published outbox rows.** The inbox has
 to outlive the broker's replay window, which makes it a deployment decision.
 
+**Gzip and Snappy are the compression codecs supported.** LZ4 and zstd would
+each need another dependency, and zstd's is a native build. A batch in an
+unsupported codec stops the consumer rather than failing one message, which is
+why `/readyz` reports consumer state.
+
 ## Security not covered
 
 No Kafka TLS or SASL, no PostgreSQL SSL, no rate limiting on the token endpoint

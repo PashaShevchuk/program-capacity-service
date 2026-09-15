@@ -9,6 +9,7 @@ import { type ConfigType } from '@nestjs/config';
 import { Kafka, type Message, type Producer, logLevel } from 'kafkajs';
 
 import { kafkaConfig } from '../config/configuration';
+import { registerCompressionCodecs } from './compression';
 
 /**
  * Owns the Kafka connection and the shared producer.
@@ -24,6 +25,8 @@ export class KafkaClientService implements OnModuleInit, OnApplicationShutdown {
   readonly kafka: Kafka;
 
   constructor(@Inject(kafkaConfig.KEY) private readonly config: ConfigType<typeof kafkaConfig>) {
+    registerCompressionCodecs();
+
     this.kafka = new Kafka({
       clientId: config.clientId,
       brokers: config.brokers,
