@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { type ConfigType } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
@@ -6,6 +8,8 @@ import {
   DuplicateReservationError,
   IdempotencyKeyConflictError,
   InsufficientCapacityError,
+  InvalidIdempotencyKeyError,
+  InvalidTimestampError,
   InvalidReservationTransitionError,
   ProgramNotActiveError,
   ReservationNotFoundError,
@@ -23,6 +27,7 @@ import { type ConversionResult } from '../fx/currency-converter';
 import { FxService } from '../fx/fx.service';
 import { LedgerEntryType } from '../ledger/capacity-ledger-entry.entity';
 import { LedgerService } from '../ledger/ledger.service';
+import { MetricsService } from '../metrics/metrics.service';
 import { OutboxService } from '../outbox/outbox.service';
 import {
   CAPACITY_CHANGED_EVENT_TYPE,
@@ -39,6 +44,12 @@ import {
 } from './reservation.commands';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Matches the `idempotency_key` column. */
+const MAX_IDEMPOTENCY_KEY_LENGTH = 128;
+
+/** Clock skew allowed on a caller-supplied timestamp. */
+const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 type ClosingStatus = ReservationStatus.Released | ReservationStatus.Cancelled;
 
@@ -62,6 +73,7 @@ export class ReservationsService {
     private readonly outbox: OutboxService,
     private readonly fx: FxService,
     private readonly capacityEvents: CapacityEventsService,
+    private readonly metrics: MetricsService,
     @Inject(kafkaConfig.KEY) private readonly kafka: ConfigType<typeof kafkaConfig>,
   ) {}
 
@@ -106,10 +118,17 @@ export class ReservationsService {
       command.occurredAt ?? new Date(),
     );
 
-    const result = await this.dataSource.transaction((manager) =>
-      this.reserveWithin(manager, command, conversion),
-    );
+    let result: ReservationResult;
+    try {
+      result = await this.dataSource.transaction((manager) =>
+        this.reserveWithin(manager, command, conversion),
+      );
+    } catch (error) {
+      this.metrics.recordReservationOutcome(program.code, 'rejected');
+      throw error;
+    }
 
+    this.metrics.recordReservationOutcome(program.code, result.changed ? 'accepted' : 'replayed');
     this.announce(result, 'RESERVE');
 
     return result;
@@ -143,6 +162,8 @@ export class ReservationsService {
     precomputed?: ConversionResult,
   ): Promise<ReservationResult> {
     const occurredAt = command.occurredAt ?? new Date();
+    assertNotInFuture(occurredAt, 'approvedAt');
+
     const program = await this.programs.lockProgram(manager, command.programRef);
 
     const replay = await this.findIdempotentReplay(manager, program, command);
@@ -204,8 +225,17 @@ export class ReservationsService {
     target: ClosingStatus,
   ): Promise<ReservationResult> {
     const occurredAt = command.occurredAt ?? new Date();
+    assertNotInFuture(occurredAt, 'occurredAt');
+
     const program = await this.programs.lockProgram(manager, command.programRef);
     const reservation = await this.findReservation(manager, program.id, command.reservationRef);
+
+    if (occurredAt.getTime() < reservation.reservedAt.getTime()) {
+      throw new InvalidTimestampError('A reservation cannot close before it was made', {
+        occurredAt: occurredAt.toISOString(),
+        reservedAt: reservation.reservedAt.toISOString(),
+      });
+    }
 
     // Repayment notifications get retried. A reservation already in the target
     // state is the outcome the caller wanted, so report success and stop.
@@ -260,6 +290,7 @@ export class ReservationsService {
   announce(result: ReservationResult, reason: string): void {
     if (!result.changed) return;
 
+    this.metrics.recordCapacity(result.program);
     this.capacityEvents.publish(
       buildCapacityChangedPayload(result.program, reason, result.reservation.id),
     );
@@ -284,13 +315,21 @@ export class ReservationsService {
     program: ProgramEntity,
     command: ReserveCapacityCommand,
   ): Promise<InvoiceReservationEntity | null> {
+    const fingerprint = fingerprintOf(program.id, command);
+
     if (command.idempotencyKey) {
+      if (command.idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+        throw new InvalidIdempotencyKeyError(MAX_IDEMPOTENCY_KEY_LENGTH);
+      }
+
       const byKey = await manager.findOne(InvoiceReservationEntity, {
         where: { idempotencyKey: command.idempotencyKey },
       });
 
       if (byKey) {
-        if (byKey.programId !== program.id || byKey.invoiceId !== command.invoiceId) {
+        // Same key must mean the same request. Returning the original for a
+        // different amount would tell the caller their new figure was reserved.
+        if (byKey.requestFingerprint !== fingerprint) {
           throw new IdempotencyKeyConflictError(command.idempotencyKey);
         }
         return byKey;
@@ -343,6 +382,7 @@ export class ReservationsService {
       idempotencyKey: command.idempotencyKey ?? null,
       externalReference: command.externalReference ?? null,
       reservedAt: fx.reservedAt,
+      requestFingerprint: fingerprintOf(program.id, command),
       metadata: command.metadata ?? {},
     });
 
@@ -395,6 +435,31 @@ export class ReservationsService {
       messageKey: program.id,
       eventType: CAPACITY_CHANGED_EVENT_TYPE,
       payload: buildCapacityChangedPayload(program, reason, reservationId),
+    });
+  }
+}
+
+/**
+ * Canonical hash of what a reservation request asked for. Two requests with the
+ * same idempotency key must hash the same, or the second one is a different
+ * request wearing a used key.
+ */
+function fingerprintOf(programId: string, command: ReserveCapacityCommand): string {
+  const canonical = JSON.stringify({
+    programId,
+    invoiceId: command.invoiceId,
+    minorUnits: command.amount.minorUnits.toString(),
+    currency: command.amount.currency,
+  });
+
+  return createHash('sha256').update(canonical).digest('hex');
+}
+
+function assertNotInFuture(moment: Date, field: string): void {
+  if (moment.getTime() > Date.now() + MAX_CLOCK_SKEW_MS) {
+    throw new InvalidTimestampError(`${field} is too far in the future`, {
+      [field]: moment.toISOString(),
+      maxSkewMs: MAX_CLOCK_SKEW_MS,
     });
   }
 }

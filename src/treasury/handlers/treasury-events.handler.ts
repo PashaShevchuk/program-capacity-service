@@ -14,6 +14,12 @@ import {
 import { LedgerEntrySource, LedgerEntryType } from '../../ledger/capacity-ledger-entry.entity';
 import { TREASURY_ACTOR } from '../../ledger/ledger-actor';
 import { LedgerService } from '../../ledger/ledger.service';
+import { OutboxService } from '../../outbox/outbox.service';
+import {
+  CAPACITY_CHANGED_EVENT_TYPE,
+  buildCapacityChangedPayload,
+} from '../../programs/capacity-changed.event';
+import { CapacityEventsService } from '../../programs/capacity-events.service';
 import { ProgramCapacityRepository } from '../../programs/program-capacity.repository';
 import { type ProgramEntity } from '../../programs/program.entity';
 import {
@@ -46,7 +52,9 @@ export class TreasuryEventsHandler implements KafkaMessageHandler, OnModuleInit 
     private readonly reservations: ReservationsService,
     private readonly programs: ProgramCapacityRepository,
     private readonly ledger: LedgerService,
-    @Inject(kafkaConfig.KEY) config: ConfigType<typeof kafkaConfig>,
+    private readonly outbox: OutboxService,
+    private readonly capacityEvents: CapacityEventsService,
+    @Inject(kafkaConfig.KEY) private readonly config: ConfigType<typeof kafkaConfig>,
   ) {
     this.topic = config.topics.treasuryEvents;
   }
@@ -146,7 +154,19 @@ export class TreasuryEventsHandler implements KafkaMessageHandler, OnModuleInit 
           reason: `Treasury set the limit to ${newLimit.toString()}`,
         });
 
-        return;
+        // Reserve and release reach subscribers through ReservationsService.
+        // A limit change has no such path of its own, so it publishes here or
+        // every consumer keeps the old limit.
+        const changed = buildCapacityChangedPayload(program, 'LIMIT_CHANGE');
+
+        await this.outbox.enqueue(manager, {
+          topic: this.config.topics.capacityChanged,
+          messageKey: program.id,
+          eventType: CAPACITY_CHANGED_EVENT_TYPE,
+          payload: changed,
+        });
+
+        return () => this.capacityEvents.publish(changed);
       }
     }
   }

@@ -165,6 +165,14 @@ export class DuplicateReservationError extends BusinessRuleViolationError {
   }
 }
 
+export class InvalidIdempotencyKeyError extends ValidationError {
+  readonly code = 'INVALID_IDEMPOTENCY_KEY';
+
+  constructor(maxLength: number) {
+    super(`Idempotency-Key must be at most ${maxLength} characters`, { maxLength });
+  }
+}
+
 export class IdempotencyKeyConflictError extends BusinessRuleViolationError {
   readonly code = 'IDEMPOTENCY_KEY_CONFLICT';
 
@@ -172,6 +180,14 @@ export class IdempotencyKeyConflictError extends BusinessRuleViolationError {
     super(`Idempotency-Key ${idempotencyKey} was already used with a different request payload`, {
       idempotencyKey,
     });
+  }
+}
+
+export class InvalidTimestampError extends ValidationError {
+  readonly code = 'INVALID_TIMESTAMP';
+
+  constructor(message: string, details: Record<string, unknown> = {}) {
+    super(message, details);
   }
 }
 

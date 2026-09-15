@@ -131,6 +131,26 @@ describe('reservations over HTTP', () => {
         .expect(400);
     });
 
+    it('refuses a negative or zero amount instead of failing in the database', async () => {
+      for (const amount of ['-100.00', '0.00']) {
+        const response = await api()
+          .post('/v1/programs/PRG-1/reservations')
+          .set('Authorization', `Bearer ${clientToken}`)
+          .send({ invoiceId: `INV-${amount}`, amount: { amount, currency: 'USD' } })
+          .expect(400);
+
+        expect(response.status).not.toBe(500);
+      }
+    });
+
+    it('refuses an amount too large for the money columns', async () => {
+      await api()
+        .post('/v1/programs/PRG-1/reservations')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .send({ invoiceId: 'INV-HUGE', amount: { amount: '999999999999999999', currency: 'USD' } })
+        .expect(400);
+    });
+
     it('returns 404 for a program that does not exist', async () => {
       await api()
         .post('/v1/programs/NOPE/reservations')
@@ -165,6 +185,37 @@ describe('reservations over HTTP', () => {
         .set('Authorization', `Bearer ${clientToken}`);
 
       expect(capacity.body.reserved.amount).toBe('100000.00');
+    });
+
+    it('rejects the same key used for a different amount', async () => {
+      await api()
+        .post('/v1/programs/PRG-1/reservations')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .set('Idempotency-Key', 'key-amount')
+        .send(body)
+        .expect(201);
+
+      // Returning the original here would tell the caller that 200,000 was
+      // reserved when only 100,000 was.
+      const response = await api()
+        .post('/v1/programs/PRG-1/reservations')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .set('Idempotency-Key', 'key-amount')
+        .send({ ...body, amount: { amount: '200000.00', currency: 'USD' } })
+        .expect(409);
+
+      expect(response.body.code).toBe('IDEMPOTENCY_KEY_CONFLICT');
+    });
+
+    it('rejects an idempotency key longer than the column allows', async () => {
+      const response = await api()
+        .post('/v1/programs/PRG-1/reservations')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .set('Idempotency-Key', 'k'.repeat(500))
+        .send(body)
+        .expect(422);
+
+      expect(response.body.code).toBe('INVALID_IDEMPOTENCY_KEY');
     });
 
     it('rejects an idempotency key reused for a different invoice', async () => {
@@ -246,6 +297,16 @@ describe('reservations over HTTP', () => {
         .set('Authorization', `Bearer ${clientToken}`);
 
       expect(capacity.body.reserved.amount).toBe('0.00');
+    });
+
+    it('refuses a release dated before the reservation was made', async () => {
+      const response = await api()
+        .post('/v1/programs/PRG-1/reservations/INV-REL/release')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .send({ occurredAt: '2020-01-01T00:00:00.000Z' })
+        .expect(422);
+
+      expect(response.body.code).toBe('INVALID_TIMESTAMP');
     });
 
     it('refuses to cancel a reservation that was already released', async () => {

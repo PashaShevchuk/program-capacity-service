@@ -1,4 +1,4 @@
-import { isStaleSequence, reconcileCapacity } from './reconciliation.calculator';
+import { isStaleSequence, isStaleSnapshot, reconcileCapacity } from './reconciliation.calculator';
 
 const base = {
   snapshotReservedMinor: 400_000_00n,
@@ -91,5 +91,26 @@ describe('isStaleSequence', () => {
 
   it('accepts a newer sequence', () => {
     expect(isStaleSequence(10n, 11n)).toBe(false);
+  });
+});
+
+describe('isStaleSnapshot', () => {
+  const at = (iso: string) => new Date(iso);
+
+  it('accepts anything before a snapshot has been applied', () => {
+    expect(isStaleSnapshot(null, at('2026-01-01T00:00:00.000Z'))).toBe(false);
+  });
+
+  it('rejects a snapshot describing an earlier moment', () => {
+    expect(isStaleSnapshot(at('2026-01-01T10:00:00.000Z'), at('2026-01-01T09:00:00.000Z'))).toBe(
+      true,
+    );
+  });
+
+  it('accepts a snapshot describing the same or a later moment', () => {
+    const applied = at('2026-01-01T10:00:00.000Z');
+
+    expect(isStaleSnapshot(applied, at('2026-01-01T10:00:00.000Z'))).toBe(false);
+    expect(isStaleSnapshot(applied, at('2026-01-01T11:00:00.000Z'))).toBe(false);
   });
 });

@@ -10,7 +10,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-import { MoneyDto } from '../../common/money/money.dto';
+import { PositiveMoneyDto } from '../../common/money/constrained-money.dto';
 
 export class CreateReservationDto {
   @ApiProperty({ example: 'INV-2026-000123' })
@@ -20,12 +20,12 @@ export class CreateReservationDto {
   invoiceId: string;
 
   @ApiProperty({
-    type: MoneyDto,
+    type: PositiveMoneyDto,
     description: "Invoice face value. May differ from the program's currency",
   })
   @ValidateNested()
-  @Type(() => MoneyDto)
-  amount: MoneyDto;
+  @Type(() => PositiveMoneyDto)
+  amount: PositiveMoneyDto;
 
   @ApiPropertyOptional({ description: 'Identifier of this invoice in an upstream system' })
   @IsOptional()

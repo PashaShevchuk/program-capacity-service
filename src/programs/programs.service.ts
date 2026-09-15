@@ -24,6 +24,7 @@ import {
 } from '../ledger/capacity-ledger-entry.entity';
 import { type LedgerActor } from '../ledger/ledger-actor';
 import { LedgerService } from '../ledger/ledger.service';
+import { MetricsService } from '../metrics/metrics.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { CAPACITY_CHANGED_EVENT_TYPE, buildCapacityChangedPayload } from './capacity-changed.event';
 import { CapacityEventsService } from './capacity-events.service';
@@ -56,6 +57,7 @@ export class ProgramsService {
     private readonly ledger: LedgerService,
     private readonly outbox: OutboxService,
     private readonly capacityEvents: CapacityEventsService,
+    private readonly metrics: MetricsService,
     @Inject(kafkaConfig.KEY) private readonly kafka: ConfigType<typeof kafkaConfig>,
   ) {}
 
@@ -186,6 +188,7 @@ export class ProgramsService {
       return locked;
     });
 
+    this.metrics.recordCapacity(program);
     this.capacityEvents.publish(buildCapacityChangedPayload(program, 'LIMIT_CHANGE'));
 
     return program;

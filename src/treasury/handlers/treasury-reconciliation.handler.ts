@@ -1,8 +1,8 @@
 import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { type ConfigType } from '@nestjs/config';
-import { EntityManager } from 'typeorm';
+import { EntityManager, In } from 'typeorm';
 
-import { CurrencyMismatchError } from '../../common/errors/domain.errors';
+import { CurrencyMismatchError, MalformedMessageError } from '../../common/errors/domain.errors';
 import { MoneyDto } from '../../common/money/money.dto';
 import { Money } from '../../common/money';
 import { kafkaConfig } from '../../config/configuration';
@@ -28,9 +28,9 @@ import {
   ReservationSource,
   ReservationStatus,
 } from '../../reservations/invoice-reservation.entity';
-import { TreasuryReconciliationDto } from '../dto/treasury-messages.dto';
+import { OpenReservationDto, TreasuryReconciliationDto } from '../dto/treasury-messages.dto';
 import { parseMessageBody } from '../message-validation';
-import { isStaleSequence, reconcileCapacity } from '../reconciliation.calculator';
+import { isStaleSequence, isStaleSnapshot, reconcileCapacity } from '../reconciliation.calculator';
 
 /**
  * Applies a full-state snapshot from the treasury system.
@@ -73,6 +73,16 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
       return;
     }
 
+    const asOf = new Date(snapshot.asOf);
+
+    if (isStaleSnapshot(program.lastReconciledAt, asOf)) {
+      this.logger.warn(
+        `Ignoring snapshot ${sequence} for ${snapshot.programCode}: it describes ${snapshot.asOf}, ` +
+          `older than the ${program.lastReconciledAt?.toISOString()} already applied`,
+      );
+      return;
+    }
+
     const snapshotLimit = MoneyDto.toMoney(snapshot.totalLimit);
     const snapshotReserved = MoneyDto.toMoney(snapshot.reservedTotal);
 
@@ -85,7 +95,10 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
 
     this.warnOnInconsistentSnapshot(snapshot, snapshotReserved);
 
-    const asOf = new Date(snapshot.asOf);
+    // Rebuild the reservation rows first, timestamped at `asOf` so they do not
+    // register as movements the snapshot has not seen.
+    await this.reconcileReservationRows(manager, program, snapshot, asOf, message.eventId);
+
     const local = await this.localMovementsSince(manager, program, asOf);
 
     const outcome = reconcileCapacity({
@@ -145,10 +158,175 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
   }
 
   /**
-   * Sums the local reservations the snapshot cannot have seen.
+   * Brings the individual reservation rows in line with the snapshot.
    *
-   * Only API-sourced rows count: anything mirrored from treasury is already
-   * reflected in the snapshot's own total.
+   * Correcting only the total would leave the program's balance right while the
+   * reservations behind it were wrong: an invoice whose reserve event was lost
+   * would stay invisible, and a later release for it would fail with
+   * RESERVATION_NOT_FOUND. The snapshot lists what treasury holds open, so it
+   * is used to recreate what is missing and close what is gone.
+   *
+   * These row changes carry no capacity delta of their own. The single
+   * adjustment entry below moves the balance; the entries written here explain
+   * the rows, so capacity has exactly one source of truth.
+   */
+  private async reconcileReservationRows(
+    manager: EntityManager,
+    program: ProgramEntity,
+    snapshot: TreasuryReconciliationDto,
+    asOf: Date,
+    correlationId: string,
+  ): Promise<void> {
+    const listed = snapshot.openReservations;
+
+    // An omitted list means the snapshot says nothing about individual rows.
+    // An empty one means treasury holds nothing open, which is a statement.
+    if (listed === undefined) return;
+
+    const wrongCurrency = listed.filter((item) => item.amount.currency !== program.currency);
+    if (wrongCurrency.length > 0) {
+      // The contract says these are quoted in the program's own currency; the
+      // snapshot carries no rate, so there is nothing to convert them with.
+      throw new MalformedMessageError(this.topic, [
+        `openReservations must be in ${program.currency}: ${wrongCurrency
+          .map((item) => `${item.invoiceId} is ${item.amount.currency}`)
+          .join(', ')}`,
+      ]);
+    }
+
+    const listedByInvoice = new Map(listed.map((item) => [item.invoiceId, item]));
+
+    const known = listedByInvoice.size
+      ? await manager.find(InvoiceReservationEntity, {
+          where: { programId: program.id, invoiceId: In([...listedByInvoice.keys()]) },
+        })
+      : [];
+    const knownByInvoice = new Map(known.map((row) => [row.invoiceId, row]));
+
+    for (const [invoiceId, item] of listedByInvoice) {
+      const existing = knownByInvoice.get(invoiceId);
+
+      if (!existing) {
+        await this.recreateReservation(manager, program, item, asOf, correlationId, snapshot);
+        continue;
+      }
+
+      if (!existing.isOpen) {
+        // We have an explicit release for it and treasury has not caught up.
+        // Local evidence is more specific, so the row stays closed.
+        this.logger.warn(
+          `Snapshot ${snapshot.sequence} still lists invoice ${invoiceId} as open, but it is ${existing.status} here`,
+        );
+      }
+    }
+
+    await this.closeReservationsMissingFrom(
+      manager,
+      program,
+      listedByInvoice,
+      asOf,
+      correlationId,
+      snapshot,
+    );
+  }
+
+  private async recreateReservation(
+    manager: EntityManager,
+    program: ProgramEntity,
+    item: OpenReservationDto,
+    asOf: Date,
+    correlationId: string,
+    snapshot: TreasuryReconciliationDto,
+  ): Promise<void> {
+    const amount = Money.fromMoneyLike(item.amount);
+
+    const reservation = await manager.save(
+      InvoiceReservationEntity,
+      manager.create(InvoiceReservationEntity, {
+        programId: program.id,
+        invoiceId: item.invoiceId,
+        status: ReservationStatus.Reserved,
+        invoiceAmountMinor: amount.minorUnits,
+        invoiceCurrency: program.currency,
+        reservedAmountMinor: amount.minorUnits,
+        programCurrency: program.currency,
+        fxRate: '1',
+        fxRateSource: 'RECONCILIATION',
+        fxRateAt: asOf,
+        source: ReservationSource.Treasury,
+        reservedAt: asOf,
+        metadata: { recreatedFromSnapshot: snapshot.sequence },
+      }),
+    );
+
+    await this.ledger.append(manager, {
+      program,
+      entryType: LedgerEntryType.ReconciliationAdjustment,
+      source: LedgerEntrySource.TreasuryReconciliation,
+      actor: TREASURY_ACTOR,
+      reservedDelta: 0n,
+      reservationId: reservation.id,
+      correlationId,
+      occurredAt: asOf,
+      reason: `Recreated reservation for invoice ${item.invoiceId} from snapshot ${snapshot.sequence}`,
+    });
+
+    this.logger.warn(
+      `Snapshot ${snapshot.sequence} contained invoice ${item.invoiceId}, which was missing locally`,
+    );
+  }
+
+  /** Closes treasury reservations the snapshot no longer lists. */
+  private async closeReservationsMissingFrom(
+    manager: EntityManager,
+    program: ProgramEntity,
+    listedByInvoice: Map<string, OpenReservationDto>,
+    asOf: Date,
+    correlationId: string,
+    snapshot: TreasuryReconciliationDto,
+  ): Promise<void> {
+    const openTreasuryRows = await manager.find(InvoiceReservationEntity, {
+      where: {
+        programId: program.id,
+        source: ReservationSource.Treasury,
+        status: ReservationStatus.Reserved,
+      },
+    });
+
+    for (const row of openTreasuryRows) {
+      if (listedByInvoice.has(row.invoiceId)) continue;
+      // Opened after the snapshot was taken, so its absence means nothing.
+      if (row.reservedAt.getTime() > asOf.getTime()) continue;
+
+      row.status = ReservationStatus.Cancelled;
+      row.cancelledAt = asOf;
+      await manager.save(InvoiceReservationEntity, row);
+
+      await this.ledger.append(manager, {
+        program,
+        entryType: LedgerEntryType.ReconciliationAdjustment,
+        source: LedgerEntrySource.TreasuryReconciliation,
+        actor: TREASURY_ACTOR,
+        reservedDelta: 0n,
+        reservationId: row.id,
+        correlationId,
+        occurredAt: asOf,
+        reason: `Closed reservation for invoice ${row.invoiceId}: absent from snapshot ${snapshot.sequence}`,
+      });
+
+      this.logger.warn(
+        `Snapshot ${snapshot.sequence} no longer lists invoice ${row.invoiceId}; closed it locally`,
+      );
+    }
+  }
+
+  /**
+   * Sums the movements the snapshot cannot have seen, by when they happened.
+   *
+   * Timing decides this, not who created the reservation. A reservation opened
+   * after `asOf` is absent from the snapshot whoever opened it, and one the
+   * snapshot counts is gone whoever closed it — a treasury-created reservation
+   * released through this API is the case a `source` filter gets wrong.
    */
   private async localMovementsSince(
     manager: EntityManager,
@@ -159,7 +337,6 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
       .createQueryBuilder(InvoiceReservationEntity, 'reservation')
       .select('COALESCE(SUM(reservation.reserved_amount_minor), 0)', 'total')
       .where('reservation.program_id = :programId', { programId: program.id })
-      .andWhere('reservation.source = :source', { source: ReservationSource.Api })
       .andWhere('reservation.status = :status', { status: ReservationStatus.Reserved })
       .andWhere('reservation.reserved_at > :asOf', { asOf })
       .getRawOne<{ total: string }>();
@@ -168,7 +345,6 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
       .createQueryBuilder(InvoiceReservationEntity, 'reservation')
       .select('COALESCE(SUM(reservation.reserved_amount_minor), 0)', 'total')
       .where('reservation.program_id = :programId', { programId: program.id })
-      .andWhere('reservation.source = :source', { source: ReservationSource.Api })
       .andWhere('reservation.status IN (:...statuses)', {
         statuses: [ReservationStatus.Released, ReservationStatus.Cancelled],
       })

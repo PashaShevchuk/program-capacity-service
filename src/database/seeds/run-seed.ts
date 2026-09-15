@@ -4,6 +4,12 @@ import { type DataSource } from 'typeorm';
 import { UserEntity, UserRole } from '../../auth/user.entity';
 import { Money } from '../../common/money';
 import { FxRateEntity } from '../../fx/fx-rate.entity';
+import {
+  CapacityLedgerEntryEntity,
+  LedgerEntrySource,
+  LedgerEntryType,
+} from '../../ledger/capacity-ledger-entry.entity';
+import { LedgerActorType } from '../../ledger/ledger-actor';
 import { ProgramEntity } from '../../programs/program.entity';
 import dataSource from '../data-source';
 
@@ -78,12 +84,38 @@ async function seedPrograms(source: DataSource): Promise<void> {
     const existing = await source.getRepository(ProgramEntity).findOneBy({ code: program.code });
     if (existing) continue;
 
-    await source.getRepository(ProgramEntity).save({
-      code: program.code,
-      name: program.name,
-      currency: program.totalLimit.currency,
-      totalLimitMinor: program.totalLimit.minorUnits,
-      reservedMinor: 0n,
+    // Through a transaction with a ledger entry, so a seeded program has the
+    // same audit history as one created through the API.
+    await source.transaction(async (manager) => {
+      const saved = await manager.save(
+        ProgramEntity,
+        manager.create(ProgramEntity, {
+          code: program.code,
+          name: program.name,
+          currency: program.totalLimit.currency,
+          totalLimitMinor: program.totalLimit.minorUnits,
+          reservedMinor: 0n,
+        }),
+      );
+
+      await manager.save(
+        CapacityLedgerEntryEntity,
+        manager.create(CapacityLedgerEntryEntity, {
+          programId: saved.id,
+          entryType: LedgerEntryType.LimitChange,
+          source: LedgerEntrySource.System,
+          actorType: LedgerActorType.System,
+          actorId: null,
+          actorLabel: 'seed',
+          currency: saved.currency,
+          reservedDeltaMinor: 0n,
+          limitDeltaMinor: program.totalLimit.minorUnits,
+          reservedAfterMinor: 0n,
+          limitAfterMinor: program.totalLimit.minorUnits,
+          reason: `Program seeded with a ${program.totalLimit.toString()} limit`,
+          occurredAt: new Date(),
+        }),
+      );
     });
 
     process.stdout.write(`program ${program.code} with a ${program.totalLimit.toString()} limit\n`);

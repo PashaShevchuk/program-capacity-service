@@ -18,6 +18,13 @@ export interface MoneyLike {
  *
  * Mixing currencies throws: crossing them is the FX layer's job.
  */
+/**
+ * Widest value a PostgreSQL `bigint` column holds. Amounts are checked against
+ * it here rather than at the database, so an oversized amount is a validation
+ * error on every path instead of a 500 from the driver.
+ */
+const MAX_MINOR_UNITS = 9_223_372_036_854_775_807n;
+
 export class Money {
   private constructor(
     readonly minorUnits: bigint,
@@ -40,6 +47,8 @@ export class Money {
         },
       );
     }
+
+    assertWithinRange(value, code);
 
     return new Money(value, code);
   }
@@ -78,8 +87,11 @@ export class Money {
     }
 
     const scaled = decimal.times(new Decimal(10).pow(exponent));
+    const minorUnits = BigInt(scaled.toFixed(0));
 
-    return new Money(BigInt(scaled.toFixed(0)), code);
+    assertWithinRange(minorUnits, code);
+
+    return new Money(minorUnits, code);
   }
 
   static fromMoneyLike(value: MoneyLike): Money {
@@ -173,5 +185,14 @@ export class Money {
     if (this.currency !== other.currency) {
       throw new CurrencyMismatchError(this.currency, other.currency);
     }
+  }
+}
+
+function assertWithinRange(minorUnits: bigint, currency: CurrencyCode): void {
+  if (minorUnits > MAX_MINOR_UNITS || minorUnits < -MAX_MINOR_UNITS) {
+    throw new InvalidAmountError(`Amount is larger than this service can store`, {
+      currency,
+      maxMinorUnits: MAX_MINOR_UNITS.toString(),
+    });
   }
 }

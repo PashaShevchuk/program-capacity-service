@@ -72,6 +72,35 @@ services:
     ports:
       - '8080:8080'
 
+  # Runs migrations and the seed, then exits. Without it a container-only stack
+  # comes up with an empty database and nothing to log in with.
+  app-seed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: capacity-app-seed
+    profiles: ['app']
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      DB_USERNAME: capacity
+      DB_PASSWORD: capacity
+      DB_NAME: capacity
+      JWT_SECRET: local-development-secret-change-me-please
+      KAFKA_ENABLED: 'false'
+      KAFKA_BROKERS: redpanda:9092
+    command:
+      - sh
+      - -c
+      - |
+        node node_modules/typeorm/cli.js migration:run -d dist/src/database/data-source.js
+        node dist/src/database/seeds/run-seed.js
+
   app:
     build:
       context: .
@@ -83,6 +112,10 @@ services:
         condition: service_healthy
       redpanda:
         condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+      app-seed:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: production
       PORT: '3000'

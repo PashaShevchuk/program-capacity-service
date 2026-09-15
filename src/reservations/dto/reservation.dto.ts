@@ -35,6 +35,9 @@ export class ReservationDto {
   @ApiProperty()
   fxRateSource: string;
 
+  @ApiProperty({ description: 'When the rate used was effective' })
+  fxRateAt: string;
+
   @ApiProperty()
   reservedAt: string;
 
@@ -58,6 +61,7 @@ export class ReservationDto {
       reservedAmount: MoneyDto.from(reservation.reservedAmount),
       fxRate: reservation.fxRate,
       fxRateSource: reservation.fxRateSource,
+      fxRateAt: reservation.fxRateAt.toISOString(),
       reservedAt: reservation.reservedAt.toISOString(),
       releasedAt: reservation.releasedAt?.toISOString() ?? null,
       cancelledAt: reservation.cancelledAt?.toISOString() ?? null,

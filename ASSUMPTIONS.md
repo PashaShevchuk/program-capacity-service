@@ -36,6 +36,24 @@ mirrored from treasury is already in the snapshot's total.
 **A residual difference is recorded, not applied silently.** It becomes a ledger
 entry carrying both sides' figures.
 
+**`openReservations` is quoted in the program's own currency.** The snapshot
+carries no FX rate, so there would be nothing to convert a foreign amount with.
+A snapshot that breaks this is rejected rather than guessed at.
+
+**A snapshot that still lists an invoice we have released leaves it closed.** We
+hold an explicit release for it and treasury has not caught up. Resurrecting a
+repaid invoice is the worse failure.
+
+**A sequence gap is not detected.** If a message is parked in the DLQ and a
+later one succeeds, the watermark moves past the gap and the parked message can
+no longer be replayed — it will be discarded as stale. Closing this properly
+needs a contract the producer takes part in: an expected-sequence field, or a
+watermark from treasury saying what it has received from us, so the service can
+tell a gap from a reordering. Building half of it here would give false
+confidence. Until then, recovery from a parked message goes through the next
+snapshot, which is why snapshots now rebuild reservation rows rather than only
+the total.
+
 ## Money and FX
 
 **Conversions round up.** Fractions of a minor unit go against the borrower, so
@@ -115,6 +133,25 @@ broker would add start-up time and flakiness without covering more.
 
 **Integration tests start their own PostgreSQL container** rather than relying
 on a running compose stack, so they are self-contained and safe in CI.
+
+## Security not covered here
+
+**No TLS or SASL on Kafka, and no SSL on PostgreSQL.** Local development runs on
+a private network. Both are configuration rather than code changes, but they
+would be required before any real deployment.
+
+**No rate limiting on the token endpoint.** Login is constant-cost — a missing
+user is compared against a real bcrypt hash so it takes as long as a wrong
+password — but nothing limits how often it can be tried.
+
+**Ledger append-only is a convention, not a database grant.** The service never
+updates or deletes those rows, but the role it connects with could. A production
+deployment would use a role without UPDATE or DELETE on that table, or a trigger
+that refuses them.
+
+**No retention on `processed_messages` or published outbox rows.** Both grow
+without bound. The inbox has to be kept longer than the broker's replay window,
+which makes the retention period a deployment decision rather than a default.
 
 ## Not built
 

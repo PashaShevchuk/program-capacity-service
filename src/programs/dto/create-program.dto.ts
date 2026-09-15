@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsNotEmpty, IsString, Matches, MaxLength, ValidateNested } from 'class-validator';
 
-import { MoneyDto } from '../../common/money/money.dto';
+import { NonNegativeMoneyDto } from '../../common/money/constrained-money.dto';
 
 export class CreateProgramDto {
   @ApiProperty({ example: 'PRG-USD-001' })
@@ -20,15 +20,18 @@ export class CreateProgramDto {
   @MaxLength(200)
   name: string;
 
-  @ApiProperty({ type: MoneyDto, description: "Sets both the limit and the program's currency" })
+  @ApiProperty({
+    type: NonNegativeMoneyDto,
+    description: "Sets both the limit and the program's currency",
+  })
   @ValidateNested()
-  @Type(() => MoneyDto)
-  totalLimit: MoneyDto;
+  @Type(() => NonNegativeMoneyDto)
+  totalLimit: NonNegativeMoneyDto;
 }
 
 export class UpdateProgramLimitDto {
-  @ApiProperty({ type: MoneyDto, description: "Must be in the program's own currency" })
+  @ApiProperty({ type: NonNegativeMoneyDto, description: "Must be in the program's own currency" })
   @ValidateNested()
-  @Type(() => MoneyDto)
-  totalLimit: MoneyDto;
+  @Type(() => NonNegativeMoneyDto)
+  totalLimit: NonNegativeMoneyDto;
 }

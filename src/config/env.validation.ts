@@ -88,6 +88,11 @@ export class EnvironmentVariables {
   @IsOptional()
   DB_RUN_MIGRATIONS_ON_BOOT = true;
 
+  @Transform(toBoolean)
+  @IsBoolean()
+  @IsOptional()
+  DB_LOGGING = false;
+
   // --- auth -----------------------------------------------------------------
 
   @IsString()

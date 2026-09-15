@@ -58,3 +58,15 @@ export function reconcileCapacity(input: ReconciliationInput): ReconciliationOut
 export function isStaleSequence(appliedSequence: bigint | null, messageSequence: bigint): boolean {
   return appliedSequence !== null && messageSequence <= appliedSequence;
 }
+
+/**
+ * True when a snapshot describes an earlier moment than one already applied.
+ *
+ * A higher sequence only means the producer sent it later, not that it
+ * describes a later state — a backfill or a re-publish can carry an older
+ * `asOf`. Applying it would roll capacity backwards, so freshness is checked on
+ * both the sequence and the business timestamp.
+ */
+export function isStaleSnapshot(appliedAsOf: Date | null, snapshotAsOf: Date): boolean {
+  return appliedAsOf !== null && snapshotAsOf.getTime() < appliedAsOf.getTime();
+}

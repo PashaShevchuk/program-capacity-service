@@ -168,10 +168,23 @@ expected = snapshot reserved
 Any remaining difference becomes a `RECONCILIATION_ADJUSTMENT` ledger entry
 with the snapshot's own figures attached, so a correction is visible.
 
+Correcting the total is not enough on its own. If the reserve event for an
+invoice was lost, the balance would be right while the reservation behind it
+was missing — and the later release would fail with `RESERVATION_NOT_FOUND`,
+leaving that capacity stuck. So when the snapshot lists `openReservations`, the
+rows are reconciled too: missing ones are recreated, ones treasury no longer
+lists are closed. Those row changes carry no capacity delta of their own, so the
+balance still has exactly one source of truth.
+
+Whether a local movement is in the snapshot is decided by **when it happened**,
+not by who created the reservation. A treasury reservation released through this
+API is the case that a `source` filter gets wrong in both directions.
+
 Messages carry a `sequence` that is monotonic per program; anything at or below
 the sequence already applied is discarded, because Kafka only orders within a
-partition. The arithmetic is a pure function, `reconcileCapacity`, unit-tested
-on its own.
+partition. A higher sequence does not have to describe a later state, so a
+snapshot whose `asOf` precedes the one already applied is rejected as well. The
+arithmetic is a pure function, `reconcileCapacity`, unit-tested on its own.
 
 ### Events are published through an outbox
 
@@ -240,8 +253,11 @@ message id behind it. Nothing updates or deletes rows there.
 }
 ```
 
-An optional `openReservations` array is used only to cross-check
-`reservedTotal`; a mismatch is logged and the reported total wins.
+`openReservations` is optional and quoted in the program's own currency. Leaving
+it out means the snapshot says nothing about individual rows; sending it empty
+means treasury holds nothing open, and local treasury rows are closed. If its
+sum disagrees with `reservedTotal`, the mismatch is logged and the reported
+total wins.
 
 **`program.capacity.changed.v1`** (published) — keyed by program id, carrying
 the new limit, reserved and available amounts, the program `version` and the
@@ -255,8 +271,10 @@ npm run test:integration   # starts a PostgreSQL container per suite
 npm test                   # both
 ```
 
-85 tests. Unit tests cover money arithmetic and precision, currency conversion
-and rounding, the reservation state machine and the reconciliation arithmetic.
+99 tests. Unit tests cover money arithmetic and precision, currency conversion
+and rounding, the reservation state machine, the reconciliation arithmetic, and
+the rule that a message which cannot be parked in the DLQ must not have its
+offset committed.
 
 Four integration suites cover what unit tests cannot prove, on a real database:
 
@@ -264,11 +282,15 @@ Four integration suites cover what unit tests cannot prove, on a real database:
   interleaved reserves and releases; one ledger entry per reservation with no
   gaps or repeats in the running balance;
 - **HTTP** — authentication, roles, cross-currency reservations, idempotent
-  retries, duplicate invoices, insufficient capacity, precision rules, release
-  and cancel, limit changes, and the audit trail naming the acting user;
+  retries and the rejection of a key reused for a different amount, duplicate
+  invoices, insufficient capacity, precision and range rules, backdated
+  releases, release and cancel, limit changes, and the audit trail naming the
+  acting user;
 - **treasury messages** — snapshots, deduplicated redeliveries, out-of-order
-  sequences, local reservations surviving a snapshot, released ones not coming
-  back, malformed payloads failing permanently;
+  sequences and out-of-order `asOf`, local reservations surviving a snapshot,
+  released ones not coming back, rows recreated and closed from a snapshot, a
+  treasury reservation released through the API not being double-counted, and
+  malformed payloads failing permanently;
 - **pagination** — every entry served exactly once, entries sharing a timestamp
   not lost, pages staying stable while new rows are written.
 

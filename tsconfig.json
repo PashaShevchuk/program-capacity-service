@@ -11,6 +11,10 @@
     "lib": ["ES2022"],
     "sourceMap": true,
     "outDir": "./dist",
+    // Pinned so the layout does not depend on which files are present. The
+    // Docker build copies only src/, and without this the output would land in
+    // dist/ instead of dist/src/ and the image entrypoint would miss it.
+    "rootDir": "./",
     "baseUrl": "./",
     "incremental": true,
     "skipLibCheck": true,

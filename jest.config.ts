@@ -32,6 +32,7 @@ const config: Config = {
     '!src/**/*.module.ts',
     '!src/main.ts',
     '!src/database/migrations/**',
+    '!src/**/*.spec.ts',
   ],
   coverageDirectory: 'coverage',
 };

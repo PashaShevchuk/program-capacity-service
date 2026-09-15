@@ -13,7 +13,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-import { MoneyDto } from '../../common/money/money.dto';
+import { NonNegativeMoneyDto, PositiveMoneyDto } from '../../common/money/constrained-money.dto';
 
 export enum TreasuryEventType {
   CapacityReserved = 'CapacityReserved',
@@ -57,8 +57,8 @@ export class CapacityReservedPayloadDto {
   invoiceId: string;
 
   @ValidateNested()
-  @Type(() => MoneyDto)
-  amount: MoneyDto;
+  @Type(() => PositiveMoneyDto)
+  amount: PositiveMoneyDto;
 
   @IsOptional()
   @IsString()
@@ -77,8 +77,8 @@ export class CapacityReleasedPayloadDto {
 
 export class ProgramLimitChangedPayloadDto {
   @ValidateNested()
-  @Type(() => MoneyDto)
-  totalLimit: MoneyDto;
+  @Type(() => NonNegativeMoneyDto)
+  totalLimit: NonNegativeMoneyDto;
 }
 
 export class OpenReservationDto {
@@ -87,8 +87,8 @@ export class OpenReservationDto {
   invoiceId: string;
 
   @ValidateNested()
-  @Type(() => MoneyDto)
-  amount: MoneyDto;
+  @Type(() => PositiveMoneyDto)
+  amount: PositiveMoneyDto;
 }
 
 /**
@@ -101,12 +101,12 @@ export class TreasuryReconciliationDto extends TreasuryEnvelopeDto {
   asOf: string;
 
   @ValidateNested()
-  @Type(() => MoneyDto)
-  totalLimit: MoneyDto;
+  @Type(() => NonNegativeMoneyDto)
+  totalLimit: NonNegativeMoneyDto;
 
   @ValidateNested()
-  @Type(() => MoneyDto)
-  reservedTotal: MoneyDto;
+  @Type(() => NonNegativeMoneyDto)
+  reservedTotal: NonNegativeMoneyDto;
 
   /** Optional detail, used only to cross-check `reservedTotal`. */
   @IsOptional()

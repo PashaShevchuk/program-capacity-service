@@ -66,7 +66,11 @@ export class KafkaConsumerService implements OnApplicationBootstrap, OnApplicati
     await this.consumer?.disconnect();
   }
 
-  private async onMessage(payload: EachMessagePayload): Promise<void> {
+  /**
+   * The `eachMessage` entry point. Public so the failure paths can be driven in
+   * tests without a broker.
+   */
+  async onMessage(payload: EachMessagePayload): Promise<void> {
     const { topic, partition, message } = payload;
     const stopTimer = this.metrics.kafkaProcessingSeconds.startTimer({ topic });
 
@@ -75,18 +79,31 @@ export class KafkaConsumerService implements OnApplicationBootstrap, OnApplicati
       parsed = parseMessage(payload);
     } catch (error) {
       this.logger.error({ err: error, topic, offset: message.offset }, 'Message is not valid JSON');
-      await this.sendToDlq(payload, error);
-      await this.commit(topic, partition, message.offset);
-      this.metrics.kafkaMessages.inc({ topic, outcome: 'dlq' });
+      await this.parkAndCommit(payload, error);
       stopTimer();
       return;
     }
 
-    const outcome = await this.processWithRetries(parsed, payload);
+    try {
+      const outcome = await this.processWithRetries(parsed, payload);
 
-    await this.commit(topic, partition, message.offset);
-    this.metrics.kafkaMessages.inc({ topic, outcome });
-    stopTimer();
+      await this.commit(topic, partition, message.offset);
+      this.metrics.kafkaMessages.inc({ topic, outcome });
+    } catch (error) {
+      // The DLQ write failed. Leave the offset where it is so the broker
+      // redelivers, and let kafkajs back off rather than spin.
+      this.metrics.kafkaMessages.inc({ topic, outcome: 'stuck' });
+      throw error;
+    } finally {
+      stopTimer();
+    }
+  }
+
+  /** Parks a message in the DLQ and only then advances past it. */
+  private async parkAndCommit(payload: EachMessagePayload, error: unknown): Promise<void> {
+    await this.sendToDlq(payload, error);
+    await this.commit(payload.topic, payload.partition, payload.message.offset);
+    this.metrics.kafkaMessages.inc({ topic: payload.topic, outcome: 'dlq' });
   }
 
   private async processWithRetries(
@@ -182,8 +199,10 @@ export class KafkaConsumerService implements OnApplicationBootstrap, OnApplicati
 
       this.logger.warn(`Message parked in ${dlqTopic}`);
     } catch (dlqError) {
-      // Losing the DLQ write would lose the message entirely, so it is loud.
+      // Rethrow: the caller must not commit the offset. Swallowing this would
+      // drop the message from both the topic and the DLQ.
       this.logger.error({ err: dlqError, dlqTopic }, 'Could not write to the DLQ');
+      throw dlqError;
     }
   }
 

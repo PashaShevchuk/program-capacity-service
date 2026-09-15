@@ -11,6 +11,9 @@ import { type LoginDto } from './dto/login.dto';
 import { type TokenResponseDto } from './dto/token-response.dto';
 import { UserEntity } from './user.entity';
 
+/** Never matches; only there to keep the failure paths the same cost. */
+const UNKNOWN_USER_HASH = '$2a$10$G3lj59DdSiVPf.aFS57iH./6JO6v4RNqn3TejhdKe5TmzvqMW/c5C';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -25,11 +28,12 @@ export class AuthService {
       .where('lower(user.email) = lower(:email)', { email: credentials.email })
       .getOne();
 
-    // Hash a dummy value when the user is missing so that a wrong email and a
-    // wrong password take the same time to answer.
+    // A real cost-10 hash of a value nobody knows. Comparing against a
+    // malformed string returns instantly, which would make a missing user
+    // measurably faster to reject than a wrong password.
     const passwordMatches = await bcrypt.compare(
       credentials.password,
-      user?.passwordHash ?? '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidinv',
+      user?.passwordHash ?? UNKNOWN_USER_HASH,
     );
 
     if (!user || !user.isActive || !passwordMatches) {

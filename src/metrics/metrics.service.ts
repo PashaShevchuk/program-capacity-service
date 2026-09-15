@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Decimal } from 'decimal.js';
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from '@prometheus-io/client';
 
 /**
@@ -47,5 +48,35 @@ export class MetricsService {
 
   constructor() {
     collectDefaultMetrics({ register: this.registry });
+  }
+
+  /** Called after a capacity change commits, so the gauges track real state. */
+  recordCapacity(program: {
+    code: string;
+    currency: string;
+    available: { minorUnits: bigint };
+    reservedMinor: bigint;
+    totalLimitMinor: bigint;
+  }): void {
+    this.availableCapacity.set(
+      { program: program.code, currency: program.currency },
+      Number(program.available.minorUnits),
+    );
+
+    const utilisation =
+      program.totalLimitMinor === 0n
+        ? 0
+        : new Decimal(program.reservedMinor.toString())
+            .dividedBy(new Decimal(program.totalLimitMinor.toString()))
+            .toNumber();
+
+    this.utilisation.set({ program: program.code }, utilisation);
+  }
+
+  recordReservationOutcome(
+    programCode: string,
+    outcome: 'accepted' | 'rejected' | 'replayed',
+  ): void {
+    this.reservations.inc({ program: programCode, outcome });
   }
 }
