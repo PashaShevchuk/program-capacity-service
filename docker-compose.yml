@@ -1,0 +1,106 @@
+name: program-capacity
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: capacity-postgres
+    environment:
+      POSTGRES_USER: capacity
+      POSTGRES_PASSWORD: capacity
+      POSTGRES_DB: capacity
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U capacity -d capacity']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Redpanda is a Kafka-API-compatible broker: single binary, no ZooKeeper,
+  # which keeps the local stack light. Any Kafka broker works in its place.
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: capacity-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=1G
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092
+      - --advertise-kafka-addr=INTERNAL://redpanda:9092,EXTERNAL://localhost:19092
+    ports:
+      - '19092:19092'
+      - '9644:9644'
+    healthcheck:
+      test: ['CMD-SHELL', 'rpk cluster health | grep -E "Healthy:.+true" || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Creates the topics the service consumes/produces, then exits.
+  redpanda-init:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: capacity-redpanda-init
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        rpk topic create treasury.capacity.events.v1 -p 3 -r 1 --brokers redpanda:9092 || true
+        rpk topic create treasury.capacity.reconciliation.v1 -p 3 -r 1 --brokers redpanda:9092 || true
+        rpk topic create program.capacity.changed.v1 -p 3 -r 1 --brokers redpanda:9092 || true
+        rpk topic create treasury.capacity.events.v1.dlq -p 1 -r 1 --brokers redpanda:9092 || true
+        rpk topic create treasury.capacity.reconciliation.v1.dlq -p 1 -r 1 --brokers redpanda:9092 || true
+        echo "topics ready"
+
+  redpanda-console:
+    image: redpandadata/console:v2.7.2
+    container_name: capacity-redpanda-console
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - '8080:8080'
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: capacity-app
+    profiles: ['app']
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      LOG_LEVEL: info
+      LOG_PRETTY: 'false'
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      DB_USERNAME: capacity
+      DB_PASSWORD: capacity
+      DB_NAME: capacity
+      DB_RUN_MIGRATIONS_ON_BOOT: 'true'
+      JWT_SECRET: local-development-secret-change-me-please
+      JWT_ISSUER: program-capacity-service
+      JWT_AUDIENCE: program-capacity-clients
+      JWT_EXPIRES_IN: 3600s
+      KAFKA_ENABLED: 'true'
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - '3000:3000'
+
+volumes:
+  postgres-data:
