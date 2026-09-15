@@ -1,28 +1,21 @@
 import { type MigrationInterface, type QueryRunner } from 'typeorm';
 
 /**
- * Initial schema. Written by hand so the money constraints are easy to review.
+ * Initial schema, written by hand so the money rules are easy to review.
  *
- * Amounts are `bigint` minor units. `reserved_minor >= 0` is enforced by the
- * database so no code path can drive it negative. `reserved_minor <=
- * total_limit_minor` is deliberately not a constraint: treasury can legitimately
- * report an overcommitted program, and rejecting that snapshot would leave us
- * permanently out of sync. `ProgramEntity.isOvercommitted` surfaces it instead.
+ * Amounts are `bigint` minor units, never floats.
  *
- * The two columns that lists are paged by, `capacity_ledger_entries.created_at`
- * and `invoice_reservations.reserved_at`, are `timestamptz(3)`. PostgreSQL keeps
- * microseconds by default and a JavaScript `Date` cannot, so a cursor built from
- * a value the service had read would fall just short of the row it came from and
- * skip every row whose microseconds were not zero. Their indexes cover
- * `(program_id, timestamp DESC, id DESC)`, which is the row value the cursor
- * compares, so paging seeks instead of sorting.
+ * The database enforces `reserved_minor >= 0` but not `reserved_minor <=
+ * total_limit_minor`: treasury can report an overcommitted program, and
+ * refusing that snapshot would leave us out of sync with it for good.
+ *
+ * `created_at` and `reserved_at` are `timestamptz(3)` because cursor paging
+ * reads them into a JavaScript Date, which cannot hold microseconds.
  */
 export class InitialSchema1789430400000 implements MigrationInterface {
   name = 'InitialSchema1789430400000';
 
   async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`);
-
     // --- users --------------------------------------------------------------
     await queryRunner.query(`
       CREATE TABLE "users" (

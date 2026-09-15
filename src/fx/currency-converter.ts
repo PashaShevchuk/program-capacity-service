@@ -1,8 +1,8 @@
 import { Decimal } from 'decimal.js';
 
-import { currencyExponent, toCurrencyCode, type CurrencyCode } from '../common/money/currency';
+import { currencyExponent, toCurrencyCode, type CurrencyCode } from '../common/money';
 import { InvalidAmountError } from '../common/errors/domain.errors';
-import { Money } from '../common/money/money';
+import { Money } from '../common/money';
 import { type ExchangeRate } from './exchange-rate.types';
 
 /**

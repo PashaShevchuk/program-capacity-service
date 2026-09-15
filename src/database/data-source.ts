@@ -13,7 +13,6 @@ import { InvoiceReservationEntity } from '../reservations/invoice-reservation.en
 // containers override the local .env file.
 loadDotEnv({ quiet: true });
 
-/** All entities in one place so the app and the migration CLI cannot diverge. */
 export const ENTITIES = [
   UserEntity,
   ProgramEntity,
@@ -37,19 +36,13 @@ export function buildDataSourceOptions(
     entities: ENTITIES,
     migrations: [`${__dirname}/migrations/*.{ts,js}`],
     migrationsTableName: 'typeorm_migrations',
-    // Schema changes go through reviewed migrations only. `synchronize` would
-    // rewrite a production schema on deploy.
+    // Schema changes go through reviewed migrations only. `synchronize` would rewrite a production schema on deploy
     synchronize: false,
     logging: resolveLogging(),
     ...overrides,
   } as DataSourceOptions;
 }
 
-/**
- * Query errors are logged by the service itself with context. Tests additionally
- * silence them because deduplication relies on a unique violation that TypeORM
- * would otherwise print on every deduplicated message.
- */
 function resolveLogging(): DataSourceOptions['logging'] {
   if (process.env.DB_LOGGING === 'true') return 'all';
   if (process.env.NODE_ENV === 'test') return ['warn', 'migration'];

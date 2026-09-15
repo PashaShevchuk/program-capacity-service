@@ -4,16 +4,35 @@ import { MoneyDto } from '../../common/money/money.dto';
 import { type ProgramEntity, ProgramStatus } from '../program.entity';
 
 export class ProgramDto {
-  @ApiProperty() id: string;
-  @ApiProperty() code: string;
-  @ApiProperty() name: string;
-  @ApiProperty({ example: 'USD' }) currency: string;
-  @ApiProperty({ enum: ProgramStatus }) status: ProgramStatus;
-  @ApiProperty({ type: MoneyDto }) totalLimit: MoneyDto;
-  @ApiProperty({ type: MoneyDto }) reserved: MoneyDto;
-  @ApiProperty({ type: MoneyDto }) available: MoneyDto;
-  @ApiProperty() version: number;
-  @ApiProperty({ nullable: true }) lastReconciledAt: string | null;
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty()
+  code: string;
+
+  @ApiProperty()
+  name: string;
+
+  @ApiProperty({ example: 'USD' })
+  currency: string;
+
+  @ApiProperty({ enum: ProgramStatus })
+  status: ProgramStatus;
+
+  @ApiProperty({ type: MoneyDto })
+  totalLimit: MoneyDto;
+
+  @ApiProperty({ type: MoneyDto })
+  reserved: MoneyDto;
+
+  @ApiProperty({ type: MoneyDto })
+  available: MoneyDto;
+
+  @ApiProperty()
+  version: number;
+
+  @ApiProperty({ nullable: true })
+  lastReconciledAt: string | null;
 
   static from(program: ProgramEntity): ProgramDto {
     return {
@@ -32,13 +51,26 @@ export class ProgramDto {
 }
 
 export class ProgramCapacityDto {
-  @ApiProperty() programId: string;
-  @ApiProperty() programCode: string;
-  @ApiProperty({ example: 'USD' }) currency: string;
-  @ApiProperty({ enum: ProgramStatus }) status: ProgramStatus;
-  @ApiProperty({ type: MoneyDto }) totalLimit: MoneyDto;
-  @ApiProperty({ type: MoneyDto }) reserved: MoneyDto;
-  @ApiProperty({ type: MoneyDto }) available: MoneyDto;
+  @ApiProperty()
+  programId: string;
+
+  @ApiProperty()
+  programCode: string;
+
+  @ApiProperty({ example: 'USD' })
+  currency: string;
+
+  @ApiProperty({ enum: ProgramStatus })
+  status: ProgramStatus;
+
+  @ApiProperty({ type: MoneyDto })
+  totalLimit: MoneyDto;
+
+  @ApiProperty({ type: MoneyDto })
+  reserved: MoneyDto;
+
+  @ApiProperty({ type: MoneyDto })
+  available: MoneyDto;
 
   @ApiProperty({ description: 'Reservations exceed the limit after a treasury reconciliation' })
   overcommitted: boolean;
@@ -49,7 +81,8 @@ export class ProgramCapacityDto {
   @ApiProperty({ nullable: true, description: 'Last treasury reconciliation applied' })
   lastReconciledAt: string | null;
 
-  @ApiProperty() asOf: string;
+  @ApiProperty()
+  asOf: string;
 
   static from(program: ProgramEntity): ProgramCapacityDto {
     return {

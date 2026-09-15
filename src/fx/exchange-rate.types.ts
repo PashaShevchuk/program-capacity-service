@@ -1,4 +1,4 @@
-import { type CurrencyCode } from '../common/money/currency';
+import { type CurrencyCode } from '../common/money';
 
 /** One rate observation: 1 `base` = `rate` `quote`, as at `asOf`. */
 export interface ExchangeRate {

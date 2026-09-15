@@ -6,7 +6,6 @@ import { EXCHANGE_RATE_PROVIDER } from './exchange-rate.types';
 import { FxRateEntity } from './fx-rate.entity';
 import { FxService } from './fx.service';
 
-/** Binds the rate port to the database adapter. A live provider swaps in here. */
 @Module({
   imports: [TypeOrmModule.forFeature([FxRateEntity])],
   providers: [

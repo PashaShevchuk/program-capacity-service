@@ -9,8 +9,8 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-import { Money } from '../common/money/money';
-import { bigintTransformer } from '../common/money/money.transformer';
+import { Money } from '../common/money';
+import { bigintTransformer } from '../common/money';
 import { ProgramEntity } from '../programs/program.entity';
 
 export enum ReservationStatus {

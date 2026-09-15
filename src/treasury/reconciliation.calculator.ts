@@ -1,18 +1,12 @@
 /**
- * Works out what a program's reserved total should be after a treasury
- * reconciliation snapshot, and how far the local figure had drifted.
+ * Works out what a program's reserved total should be after a treasury snapshot.
  *
- * The snapshot is authoritative as at `asOf`, but it is not the whole picture:
- * this service may have accepted reservations after that moment which treasury
- * has not seen yet, and it may have released reservations that the snapshot
- * still counts as open. Overwriting with the raw snapshot total would drop the
- * first group and double-count the second.
+ * The snapshot is right as at `asOf`, but we have moved on since: reservations
+ * treasury has not seen yet, and ones it still counts that we have closed.
  *
- *   expected = snapshot
- *            + reservations opened here after asOf and still open
- *            - reservations the snapshot counts that we have since closed
+ *   expected = snapshot + opened here after asOf - closed here after asOf
  *
- * Kept pure so the arithmetic can be tested without a database.
+ * Pure, so the arithmetic is testable without a database.
  */
 export interface ReconciliationInput {
   /** Reserved total reported by treasury, as at `asOf`. */

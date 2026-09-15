@@ -8,7 +8,7 @@ export interface ParsedKafkaMessage<T = unknown> {
   key: string | null;
   headers: Record<string, string>;
   body: T;
-  /** Id used for deduplication. Taken from the body's `eventId`. */
+  /** I'd used for deduplication. Taken from the body's `eventId`. */
   eventId: string;
   eventType: string | null;
   timestamp: Date;

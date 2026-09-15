@@ -7,8 +7,8 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-import { Money } from '../common/money/money';
-import { bigintTransformer } from '../common/money/money.transformer';
+import { Money } from '../common/money';
+import { bigintTransformer } from '../common/money';
 
 export enum ProgramStatus {
   /** Accepts new reservations. */

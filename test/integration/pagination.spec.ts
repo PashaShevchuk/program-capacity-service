@@ -2,7 +2,7 @@ import request from 'supertest';
 import { type Server } from 'node:http';
 
 import { UserRole } from '../../src/auth/user.entity';
-import { Money } from '../../src/common/money/money';
+import { Money } from '../../src/common/money';
 import { LedgerEntrySource } from '../../src/ledger/capacity-ledger-entry.entity';
 import { ReservationSource } from '../../src/reservations/invoice-reservation.entity';
 import { ReservationsService } from '../../src/reservations/reservations.service';

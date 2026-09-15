@@ -46,6 +46,7 @@ export class KafkaConsumerService implements OnApplicationBootstrap, OnApplicati
     });
 
     await this.consumer.connect();
+
     for (const topic of topics) {
       await this.consumer.subscribe({ topic, fromBeginning: false });
     }

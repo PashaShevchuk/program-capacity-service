@@ -8,11 +8,20 @@ import {
 } from '../invoice-reservation.entity';
 
 export class ReservationDto {
-  @ApiProperty() id: string;
-  @ApiProperty() programId: string;
-  @ApiProperty() invoiceId: string;
-  @ApiProperty({ enum: ReservationStatus }) status: ReservationStatus;
-  @ApiProperty({ enum: ReservationSource }) source: ReservationSource;
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty()
+  programId: string;
+
+  @ApiProperty()
+  invoiceId: string;
+
+  @ApiProperty({ enum: ReservationStatus })
+  status: ReservationStatus;
+
+  @ApiProperty({ enum: ReservationSource })
+  source: ReservationSource;
 
   @ApiProperty({ type: MoneyDto, description: 'Invoice face value' })
   invoiceAmount: MoneyDto;
@@ -23,11 +32,20 @@ export class ReservationDto {
   @ApiProperty({ description: 'Rate frozen at reservation time', example: '1.085000000000' })
   fxRate: string;
 
-  @ApiProperty() fxRateSource: string;
-  @ApiProperty() reservedAt: string;
-  @ApiProperty({ nullable: true }) releasedAt: string | null;
-  @ApiProperty({ nullable: true }) cancelledAt: string | null;
-  @ApiProperty({ nullable: true }) externalReference: string | null;
+  @ApiProperty()
+  fxRateSource: string;
+
+  @ApiProperty()
+  reservedAt: string;
+
+  @ApiProperty({ nullable: true })
+  releasedAt: string | null;
+
+  @ApiProperty({ nullable: true })
+  cancelledAt: string | null;
+
+  @ApiProperty({ nullable: true })
+  externalReference: string | null;
 
   static from(reservation: InvoiceReservationEntity): ReservationDto {
     return {

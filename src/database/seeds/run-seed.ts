@@ -2,7 +2,7 @@ import * as bcrypt from 'bcryptjs';
 import { type DataSource } from 'typeorm';
 
 import { UserEntity, UserRole } from '../../auth/user.entity';
-import { Money } from '../../common/money/money';
+import { Money } from '../../common/money';
 import { FxRateEntity } from '../../fx/fx-rate.entity';
 import { ProgramEntity } from '../../programs/program.entity';
 import dataSource from '../data-source';

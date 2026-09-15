@@ -9,7 +9,6 @@ import { ReservationsModule } from '../reservations/reservations.module';
 import { TreasuryEventsHandler } from './handlers/treasury-events.handler';
 import { TreasuryReconciliationHandler } from './handlers/treasury-reconciliation.handler';
 
-/** Consumes the treasury system's capacity feed. */
 @Module({
   imports: [
     TypeOrmModule.forFeature([InvoiceReservationEntity]),

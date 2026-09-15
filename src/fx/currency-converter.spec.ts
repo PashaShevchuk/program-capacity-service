@@ -1,4 +1,4 @@
-import { Money } from '../common/money/money';
+import { Money } from '../common/money';
 import { InvalidAmountError } from '../common/errors/domain.errors';
 import { ConversionRounding, convertMoney, identityRate } from './currency-converter';
 import { type ExchangeRate } from './exchange-rate.types';

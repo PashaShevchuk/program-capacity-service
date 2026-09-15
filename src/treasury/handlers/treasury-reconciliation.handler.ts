@@ -4,7 +4,7 @@ import { EntityManager } from 'typeorm';
 
 import { CurrencyMismatchError } from '../../common/errors/domain.errors';
 import { MoneyDto } from '../../common/money/money.dto';
-import { Money } from '../../common/money/money';
+import { Money } from '../../common/money';
 import { kafkaConfig } from '../../config/configuration';
 import { KafkaHandlerRegistry } from '../../kafka/kafka-handler.registry';
 import {

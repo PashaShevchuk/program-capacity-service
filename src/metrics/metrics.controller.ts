@@ -9,8 +9,7 @@ export class MetricsController {
   constructor(private readonly metrics: MetricsService) {}
 
   /**
-   * Public so a scraper does not need a token. In a real deployment this port
-   * is not exposed outside the cluster.
+   * Public so a scraper does not need a token. In a real deployment this port is not exposed outside the cluster.
    */
   @Public()
   @Get('metrics')

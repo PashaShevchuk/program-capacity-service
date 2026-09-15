@@ -10,7 +10,7 @@ import {
   ProgramNotActiveError,
   ReservationNotFoundError,
 } from '../common/errors/domain.errors';
-import { type Money } from '../common/money/money';
+import { type Money } from '../common/money';
 import {
   buildCursorPage,
   type CursorPageDto,
