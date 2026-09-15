@@ -40,6 +40,17 @@ describe('reservations over HTTP', () => {
         .expect(401);
     });
 
+    it('answers a wrong password the same way whatever its length', async () => {
+      // A minimum length on sign-in would reject a short password as malformed
+      // and a long one as wrong, telling a caller about the password policy.
+      for (const password of ['short', 'a-long-wrong-password']) {
+        await request(context.app.getHttpServer() as Server)
+          .post('/v1/auth/token')
+          .send({ email: 'client@test.local', password })
+          .expect(401);
+      }
+    });
+
     it('lets an authenticated viewer read capacity', async () => {
       const response = await api()
         .get('/v1/programs/PRG-1/capacity')
