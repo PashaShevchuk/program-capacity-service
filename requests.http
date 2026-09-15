@@ -1,0 +1,119 @@
+# Program Capacity & Invoice Reservation - example requests
+#
+# Works with the VS Code REST Client and the JetBrains HTTP client.
+# Run `docker compose up -d`, `npm run migration:run`, `npm run seed` first.
+
+@host = http://localhost:3000
+@program = PRG-USD-001
+
+### Get a token (admin can also create programs and change limits)
+# @name login
+POST {{host}}/v1/auth/token
+Content-Type: application/json
+
+{ "email": "admin@demo.local", "password": "Admin123!" }
+
+### Store the token
+@token = {{login.response.body.accessToken}}
+
+### Current capacity
+GET {{host}}/v1/programs/{{program}}/capacity
+Authorization: Bearer {{token}}
+
+### Reserve for an invoice in the program's own currency
+POST {{host}}/v1/programs/{{program}}/reservations
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Idempotency-Key: demo-key-001
+
+{
+  "invoiceId": "INV-2026-000123",
+  "amount": { "amount": "250000.00", "currency": "USD" },
+  "externalReference": "ERP-98765"
+}
+
+### Reserve for an invoice in another currency (converted at the stored rate)
+POST {{host}}/v1/programs/{{program}}/reservations
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Idempotency-Key: demo-key-002
+
+{
+  "invoiceId": "INV-2026-000124",
+  "amount": { "amount": "1000000.00", "currency": "EUR" }
+}
+
+### Retry the same request: returns the original reservation, 200 not 201
+POST {{host}}/v1/programs/{{program}}/reservations
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Idempotency-Key: demo-key-002
+
+{
+  "invoiceId": "INV-2026-000124",
+  "amount": { "amount": "1000000.00", "currency": "EUR" }
+}
+
+### Ask for more than is available: 409 with the numbers in the body
+POST {{host}}/v1/programs/{{program}}/reservations
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "invoiceId": "INV-TOO-BIG",
+  "amount": { "amount": "50000000.00", "currency": "USD" }
+}
+
+### List reservations
+GET {{host}}/v1/programs/{{program}}/reservations?page=1&pageSize=20
+Authorization: Bearer {{token}}
+
+### Release after repayment
+POST {{host}}/v1/programs/{{program}}/reservations/INV-2026-000124/release
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "reason": "Invoice repaid in full" }
+
+### Cancel a reservation that will not be paid out
+POST {{host}}/v1/programs/{{program}}/reservations/INV-2026-000123/cancel
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "reason": "Approval withdrawn" }
+
+### Audit trail
+GET {{host}}/v1/programs/{{program}}/ledger?pageSize=20
+Authorization: Bearer {{token}}
+
+### Raise the credit limit (admin only)
+PATCH {{host}}/v1/programs/{{program}}/limit
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "totalLimit": { "amount": "15000000.00", "currency": "USD" } }
+
+### Create a program (admin only)
+POST {{host}}/v1/programs
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "code": "PRG-GBP-001",
+  "name": "UK Receivables GBP",
+  "totalLimit": { "amount": "2000000.00", "currency": "GBP" }
+}
+
+### Stream capacity changes (server-sent events)
+GET {{host}}/v1/programs/{{program}}/capacity/stream
+Authorization: Bearer {{token}}
+Accept: text/event-stream
+
+### Liveness
+GET {{host}}/healthz
+
+### Readiness
+GET {{host}}/readyz
+
+### Metrics
+GET {{host}}/metrics
