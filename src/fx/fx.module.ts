@@ -1,0 +1,19 @@
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+
+import { DatabaseExchangeRateProvider } from './database-exchange-rate.provider';
+import { EXCHANGE_RATE_PROVIDER } from './exchange-rate.types';
+import { FxRateEntity } from './fx-rate.entity';
+import { FxService } from './fx.service';
+
+/** Binds the rate port to the database adapter. A live provider swaps in here. */
+@Module({
+  imports: [TypeOrmModule.forFeature([FxRateEntity])],
+  providers: [
+    FxService,
+    DatabaseExchangeRateProvider,
+    { provide: EXCHANGE_RATE_PROVIDER, useExisting: DatabaseExchangeRateProvider },
+  ],
+  exports: [FxService, EXCHANGE_RATE_PROVIDER],
+})
+export class FxModule {}
