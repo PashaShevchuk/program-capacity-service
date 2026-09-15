@@ -52,7 +52,12 @@ export class CapacityLedgerEntryEntity {
   currency: string;
 
   /** Signed change to the reserved total; positive takes capacity. */
-  @Column({ name: 'reserved_delta_minor', type: 'bigint', default: 0, transformer: bigintTransformer })
+  @Column({
+    name: 'reserved_delta_minor',
+    type: 'bigint',
+    default: 0,
+    transformer: bigintTransformer,
+  })
   reservedDeltaMinor: bigint;
 
   /** Signed change to the total credit limit. */

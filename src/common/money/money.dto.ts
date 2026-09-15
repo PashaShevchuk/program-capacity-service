@@ -17,7 +17,9 @@ export class MoneyDto {
 
   @ApiProperty({ example: 'EUR', enum: SUPPORTED_CURRENCIES })
   @IsString()
-  @IsIn(SUPPORTED_CURRENCIES, { message: `currency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}` })
+  @IsIn(SUPPORTED_CURRENCIES, {
+    message: `currency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`,
+  })
   currency: string;
 
   /** Throws InvalidAmountError if the scale exceeds what the currency allows. */

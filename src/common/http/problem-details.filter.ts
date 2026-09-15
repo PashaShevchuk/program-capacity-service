@@ -34,7 +34,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
 
     const problem = this.toProblemDetails(exception, request);
 
-    if (problem.status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+    if (problem.status >= 500) {
       this.logger.error(
         { err: exception, requestId: problem.requestId, path: problem.instance },
         'Unhandled error',

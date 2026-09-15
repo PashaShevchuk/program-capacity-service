@@ -34,10 +34,13 @@ export class Money {
     try {
       value = typeof minorUnits === 'bigint' ? minorUnits : BigInt(minorUnits);
     } catch {
-      throw new InvalidAmountError(`Amount is not an integer number of minor units: ${String(minorUnits)}`, {
-        value: String(minorUnits),
-        currency: code,
-      });
+      throw new InvalidAmountError(
+        `Amount is not an integer number of minor units: ${String(minorUnits)}`,
+        {
+          value: String(minorUnits),
+          currency: code,
+        },
+      );
     }
 
     return new Money(value, code);

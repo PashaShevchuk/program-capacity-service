@@ -56,6 +56,16 @@ export class InvalidAmountError extends ValidationError {
   }
 }
 
+// --- messaging --------------------------------------------------------------
+
+export class MalformedMessageError extends ValidationError {
+  readonly code = 'MALFORMED_MESSAGE';
+
+  constructor(topic: string, violations: string[]) {
+    super(`Message on ${topic} does not match its contract`, { topic, violations });
+  }
+}
+
 // --- fx ---------------------------------------------------------------------
 
 export class ExchangeRateUnavailableError extends BusinessRuleViolationError {
@@ -149,10 +159,9 @@ export class IdempotencyKeyConflictError extends BusinessRuleViolationError {
   readonly code = 'IDEMPOTENCY_KEY_CONFLICT';
 
   constructor(idempotencyKey: string) {
-    super(
-      `Idempotency-Key ${idempotencyKey} was already used with a different request payload`,
-      { idempotencyKey },
-    );
+    super(`Idempotency-Key ${idempotencyKey} was already used with a different request payload`, {
+      idempotencyKey,
+    });
   }
 }
 

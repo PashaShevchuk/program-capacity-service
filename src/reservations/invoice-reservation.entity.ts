@@ -105,7 +105,10 @@ export class InvoiceReservationEntity {
   source: ReservationSource;
 
   /** Client `Idempotency-Key`; unique so a retried POST cannot reserve twice. */
-  @Index('uq_invoice_reservations_idempotency_key', { unique: true, where: 'idempotency_key IS NOT NULL' })
+  @Index('uq_invoice_reservations_idempotency_key', {
+    unique: true,
+    where: 'idempotency_key IS NOT NULL',
+  })
   @Column({ name: 'idempotency_key', type: 'varchar', length: 128, nullable: true })
   idempotencyKey: string | null;
 

@@ -1,4 +1,8 @@
-import { CurrencyMismatchError, InvalidAmountError, InvalidCurrencyError } from '../errors/domain.errors';
+import {
+  CurrencyMismatchError,
+  InvalidAmountError,
+  InvalidCurrencyError,
+} from '../errors/domain.errors';
 import { Money } from './money';
 
 describe('Money', () => {
