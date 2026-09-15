@@ -19,7 +19,7 @@ import { buildDataSourceOptions } from './data-source';
           // Migrating on boot keeps `docker compose up` a single step. With more
           // than one replica this belongs in a deploy job instead (ADR-0002).
           migrationsRun: db.runMigrationsOnBoot,
-        } as never),
+        }),
     }),
   ],
 })

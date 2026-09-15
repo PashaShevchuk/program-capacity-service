@@ -41,7 +41,10 @@ function parseDurationSeconds(value: string): number {
 
 export const kafkaConfig = registerAs('kafka', () => ({
   enabled: process.env.KAFKA_ENABLED !== 'false',
-  brokers: (process.env.KAFKA_BROKERS ?? '').split(',').map((broker) => broker.trim()).filter(Boolean),
+  brokers: (process.env.KAFKA_BROKERS ?? '')
+    .split(',')
+    .map((broker) => broker.trim())
+    .filter(Boolean),
   clientId: process.env.KAFKA_CLIENT_ID ?? 'program-capacity-service',
   consumerGroupId: process.env.KAFKA_CONSUMER_GROUP_ID ?? 'program-capacity-service',
   topics: {

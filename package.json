@@ -28,7 +28,8 @@
     "migration:run": "npm run typeorm -- migration:run",
     "migration:revert": "npm run typeorm -- migration:revert",
     "migration:show": "npm run typeorm -- migration:show",
-    "seed": "ts-node src/database/seeds/run-seed.ts"
+    "seed": "ts-node src/database/seeds/run-seed.ts",
+    "simulate:treasury": "ts-node scripts/simulate-treasury.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
@@ -46,6 +47,7 @@
     "class-validator": "^0.14.1",
     "decimal.js": "^10.4.3",
     "dotenv": "^17.4.2",
+    "helmet": "^8.3.0",
     "kafkajs": "^2.2.4",
     "nestjs-pino": "^4.1.0",
     "passport": "^0.7.0",

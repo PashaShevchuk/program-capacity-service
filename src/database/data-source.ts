@@ -9,7 +9,9 @@ import { OutboxMessageEntity } from '../outbox/outbox-message.entity';
 import { ProgramEntity } from '../programs/program.entity';
 import { InvoiceReservationEntity } from '../reservations/invoice-reservation.entity';
 
-loadDotEnv();
+// Values already in the environment win, which is what lets tests and
+// containers override the local .env file.
+loadDotEnv({ quiet: true });
 
 /** All entities in one place so the app and the migration CLI cannot diverge. */
 export const ENTITIES = [
@@ -22,7 +24,9 @@ export const ENTITIES = [
   OutboxMessageEntity,
 ];
 
-export function buildDataSourceOptions(overrides: Partial<DataSourceOptions> = {}): DataSourceOptions {
+export function buildDataSourceOptions(
+  overrides: Partial<DataSourceOptions> = {},
+): DataSourceOptions {
   return {
     type: 'postgres',
     host: process.env.DB_HOST ?? 'localhost',
@@ -36,9 +40,21 @@ export function buildDataSourceOptions(overrides: Partial<DataSourceOptions> = {
     // Schema changes go through reviewed migrations only. `synchronize` would
     // rewrite a production schema on deploy.
     synchronize: false,
-    logging: process.env.DB_LOGGING === 'true' ? 'all' : ['error', 'warn', 'migration'],
+    logging: resolveLogging(),
     ...overrides,
   } as DataSourceOptions;
+}
+
+/**
+ * Query errors are logged by the service itself with context. Tests additionally
+ * silence them because deduplication relies on a unique violation that TypeORM
+ * would otherwise print on every deduplicated message.
+ */
+function resolveLogging(): DataSourceOptions['logging'] {
+  if (process.env.DB_LOGGING === 'true') return 'all';
+  if (process.env.NODE_ENV === 'test') return ['warn', 'migration'];
+
+  return ['error', 'warn', 'migration'];
 }
 
 /** Used by the TypeORM CLI (`npm run migration:run`). */
