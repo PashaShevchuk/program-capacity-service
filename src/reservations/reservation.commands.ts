@@ -22,6 +22,8 @@ export interface ReserveCapacityCommand {
   correlationId?: string | null;
   /** When the approval happened; also the moment the FX rate is taken at. */
   occurredAt?: Date;
+  /** Treasury reserves report what already happened, so they may overcommit. */
+  allowOvercommit?: boolean;
   metadata?: Record<string, unknown>;
 }
 
@@ -34,6 +36,8 @@ export interface CloseReservationCommand {
   correlationId?: string | null;
   occurredAt?: Date;
   reason?: string | null;
+  /** Accept a reservation reconciliation already closed instead of failing. */
+  allowAlreadyClosed?: boolean;
 }
 
 export interface ReservationResult {

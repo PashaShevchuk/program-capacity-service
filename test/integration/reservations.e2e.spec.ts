@@ -207,6 +207,25 @@ describe('reservations over HTTP', () => {
       expect(response.body.code).toBe('IDEMPOTENCY_KEY_CONFLICT');
     });
 
+    it('rejects the same key used with a different approval time', async () => {
+      // approvedAt picks the FX rate, so it changes how much capacity is taken.
+      await api()
+        .post('/v1/programs/PRG-1/reservations')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .set('Idempotency-Key', 'key-approved-at')
+        .send({ ...body, approvedAt: '2026-02-01T00:00:00.000Z' })
+        .expect(201);
+
+      const response = await api()
+        .post('/v1/programs/PRG-1/reservations')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .set('Idempotency-Key', 'key-approved-at')
+        .send({ ...body, approvedAt: '2026-03-01T00:00:00.000Z' })
+        .expect(409);
+
+      expect(response.body.code).toBe('IDEMPOTENCY_KEY_CONFLICT');
+    });
+
     it('rejects an idempotency key longer than the column allows', async () => {
       const response = await api()
         .post('/v1/programs/PRG-1/reservations')

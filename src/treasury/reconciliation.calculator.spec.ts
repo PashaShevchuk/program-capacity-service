@@ -7,6 +7,7 @@ const base = {
   currentLimitMinor: 1_000_000_00n,
   openedLocallyAfterSnapshotMinor: 0n,
   closedLocallyAfterSnapshotMinor: 0n,
+  openReservationsMinor: 0n,
 };
 
 describe('reconcileCapacity', () => {
@@ -69,6 +70,40 @@ describe('reconcileCapacity', () => {
     });
 
     expect(outcome.expectedReservedMinor).toBe(0n);
+  });
+
+  describe('the open-rows floor', () => {
+    it('never reports less reserved than the open rows hold', () => {
+      // Treasury has not received a reservation this service just accepted.
+      const outcome = reconcileCapacity({
+        ...base,
+        snapshotReservedMinor: 0n,
+        currentReservedMinor: 900_00n,
+        openReservationsMinor: 900_00n,
+      });
+
+      expect(outcome.expectedReservedMinor).toBe(900_00n);
+      expect(outcome.flooredToOpenRows).toBe(true);
+      expect(outcome.hasDrift).toBe(false);
+    });
+
+    it('leaves the arithmetic alone when it already clears the floor', () => {
+      const outcome = reconcileCapacity({ ...base, openReservationsMinor: 100_000_00n });
+
+      expect(outcome.expectedReservedMinor).toBe(400_000_00n);
+      expect(outcome.flooredToOpenRows).toBe(false);
+    });
+
+    it('still lets treasury raise the reserved total', () => {
+      const outcome = reconcileCapacity({
+        ...base,
+        snapshotReservedMinor: 800_000_00n,
+        openReservationsMinor: 400_000_00n,
+      });
+
+      expect(outcome.expectedReservedMinor).toBe(800_000_00n);
+      expect(outcome.flooredToOpenRows).toBe(false);
+    });
   });
 
   it('picks up a limit change from the snapshot', () => {

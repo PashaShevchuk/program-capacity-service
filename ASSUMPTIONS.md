@@ -30,8 +30,17 @@ not `reserved <= limit`. The API path can never produce an overcommit.
 reasonably close. With clocks far apart, the honest fix is for the snapshot to
 carry treasury's own watermark for what it has received from us.
 
-**Only API-sourced reservations are layered back onto a snapshot.** Anything
-mirrored from treasury is already in the snapshot's total.
+**A local movement counts as unseen by timing, not by who created it.** A
+reservation opened after `asOf` is absent from the snapshot whoever opened it,
+and one the snapshot counts is gone whoever closed it.
+
+**The reserved total never drops below what the open rows hold.** `asOf` is
+treasury's clock and cannot say whether treasury has *received* a reservation
+accepted moments earlier, so the snapshot arithmetic is floored by the open
+rows. The cost is that a program can sit temporarily over-reserved; the
+alternative is handing the same capacity out twice. Removing this floor safely
+needs an acknowledgement watermark in the contract — treasury telling us which
+of our events it has taken in — rather than a timestamp.
 
 **A residual difference is recorded, not applied silently.** It becomes a ledger
 entry carrying both sides' figures.
@@ -43,6 +52,16 @@ A snapshot that breaks this is rejected rather than guessed at.
 **A snapshot that still lists an invoice we have released leaves it closed.** We
 hold an explicit release for it and treasury has not caught up. Resurrecting a
 repaid invoice is the worse failure.
+
+**Incremental treasury reserves may overcommit a program.** They report what
+already happened at the source of truth, so refusing one would leave the two
+permanently out of step. A snapshot can overcommit a program for the same
+reason. The API path can never do it, and `overcommitted` is exposed on the
+capacity endpoint.
+
+**Reconciliation closes a dropped reservation as `CANCELLED`.** A treasury
+release arriving afterwards is accepted as already applied rather than rejected
+as an invalid transition.
 
 **A sequence gap is not detected.** If a message is parked in the DLQ and a
 later one succeeds, the watermark moves past the gap and the parked message can

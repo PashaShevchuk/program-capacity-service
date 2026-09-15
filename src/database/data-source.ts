@@ -44,7 +44,7 @@ export function buildDataSourceOptions(
 }
 
 function resolveLogging(): DataSourceOptions['logging'] {
-  if (process.env.DB_LOGGING === 'true') return 'all';
+  if (process.env.DB_LOGGING === 'true' || process.env.DB_LOGGING === '1') return 'all';
   if (process.env.NODE_ENV === 'test') return ['warn', 'migration'];
 
   return ['error', 'warn', 'migration'];

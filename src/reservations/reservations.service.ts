@@ -179,7 +179,11 @@ export class ReservationsService {
       precomputed ?? (await this.fx.convert(command.amount, program.currency, occurredAt));
     const required = conversion.amount;
 
-    if (program.available.isLessThan(required)) {
+    // A treasury reserve reports something that already happened at the source
+    // of truth. Refusing it would leave the two permanently out of step, and a
+    // snapshot can overcommit a program anyway, so it is allowed through and
+    // surfaced as `overcommitted`.
+    if (!command.allowOvercommit && program.available.isLessThan(required)) {
       throw new InsufficientCapacityError({
         programId: program.code,
         currency: program.currency,
@@ -240,6 +244,15 @@ export class ReservationsService {
     // Repayment notifications get retried. A reservation already in the target
     // state is the outcome the caller wanted, so report success and stop.
     if (reservation.status === target) {
+      return { reservation, program, changed: false };
+    }
+
+    // Reconciliation may have closed the row already. Treasury reporting the
+    // release afterwards is not a conflict, it is the same outcome.
+    if (command.allowAlreadyClosed && !reservation.isOpen) {
+      this.logger.log(
+        `Reservation for invoice ${reservation.invoiceId} is already ${reservation.status}; treating the release as applied`,
+      );
       return { reservation, program, changed: false };
     }
 
@@ -450,6 +463,11 @@ function fingerprintOf(programId: string, command: ReserveCapacityCommand): stri
     invoiceId: command.invoiceId,
     minorUnits: command.amount.minorUnits.toString(),
     currency: command.amount.currency,
+    // The approval time picks the FX rate, so two requests that differ only
+    // here can reserve different amounts of capacity. `null` when the caller
+    // omitted it, so a default of "now" does not make every retry look new.
+    occurredAt: command.occurredAt?.toISOString() ?? null,
+    externalReference: command.externalReference ?? null,
   });
 
   return createHash('sha256').update(canonical).digest('hex');

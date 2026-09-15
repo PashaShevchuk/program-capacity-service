@@ -15,6 +15,7 @@ import {
 import { LedgerEntrySource, LedgerEntryType } from '../../ledger/capacity-ledger-entry.entity';
 import { TREASURY_ACTOR } from '../../ledger/ledger-actor';
 import { LedgerService } from '../../ledger/ledger.service';
+import { MetricsService } from '../../metrics/metrics.service';
 import { OutboxService } from '../../outbox/outbox.service';
 import {
   CAPACITY_CHANGED_EVENT_TYPE,
@@ -31,6 +32,9 @@ import {
 import { OpenReservationDto, TreasuryReconciliationDto } from '../dto/treasury-messages.dto';
 import { parseMessageBody } from '../message-validation';
 import { isStaleSequence, isStaleSnapshot, reconcileCapacity } from '../reconciliation.calculator';
+
+/** Clock skew tolerated on a snapshot's own timestamps. */
+const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 /**
  * Applies a full-state snapshot from the treasury system.
@@ -52,6 +56,7 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
     private readonly ledger: LedgerService,
     private readonly outbox: OutboxService,
     private readonly capacityEvents: CapacityEventsService,
+    private readonly metrics: MetricsService,
     @Inject(kafkaConfig.KEY) private readonly config: ConfigType<typeof kafkaConfig>,
   ) {
     this.topic = config.topics.treasuryReconciliation;
@@ -75,6 +80,14 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
 
     const asOf = new Date(snapshot.asOf);
 
+    // A snapshot dated in the future would become the watermark and make every
+    // later one look stale, so the program would stop reconciling entirely.
+    if (asOf.getTime() > Date.now() + MAX_CLOCK_SKEW_MS) {
+      throw new MalformedMessageError(this.topic, [
+        `asOf ${snapshot.asOf} is more than ${MAX_CLOCK_SKEW_MS}ms in the future`,
+      ]);
+    }
+
     if (isStaleSnapshot(program.lastReconciledAt, asOf)) {
       this.logger.warn(
         `Ignoring snapshot ${sequence} for ${snapshot.programCode}: it describes ${snapshot.asOf}, ` +
@@ -93,13 +106,14 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
       throw new CurrencyMismatchError(program.currency, snapshotLimit.currency);
     }
 
-    this.warnOnInconsistentSnapshot(snapshot, snapshotReserved);
+    this.assertSnapshotIsConsistent(snapshot, snapshotReserved);
 
     // Rebuild the reservation rows first, timestamped at `asOf` so they do not
     // register as movements the snapshot has not seen.
     await this.reconcileReservationRows(manager, program, snapshot, asOf, message.eventId);
 
     const local = await this.localMovementsSince(manager, program, asOf);
+    const openReservationsMinor = await this.openReservationsTotal(manager, program);
 
     const outcome = reconcileCapacity({
       snapshotReservedMinor: snapshotReserved.minorUnits,
@@ -108,7 +122,16 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
       currentLimitMinor: program.totalLimitMinor,
       openedLocallyAfterSnapshotMinor: local.opened,
       closedLocallyAfterSnapshotMinor: local.closed,
+      openReservationsMinor,
     });
+
+    if (outcome.flooredToOpenRows) {
+      this.logger.error(
+        `Snapshot ${sequence} for ${program.code} reported less reserved than the ` +
+          `${openReservationsMinor} minor units still open here; holding the higher figure. ` +
+          `Treasury has most likely not received a recent reservation yet.`,
+      );
+    }
 
     if (!outcome.hasDrift && !outcome.hasLimitChange) {
       await this.programs.markTreasuryProgress(manager, program, sequence, asOf);
@@ -154,7 +177,11 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
     );
 
     const payload = buildCapacityChangedPayload(program, 'RECONCILIATION');
-    return () => this.capacityEvents.publish(payload);
+
+    return () => {
+      this.metrics.recordCapacity(program);
+      this.capacityEvents.publish(payload);
+    };
   }
 
   /**
@@ -217,6 +244,23 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
         this.logger.warn(
           `Snapshot ${snapshot.sequence} still lists invoice ${invoiceId} as open, but it is ${existing.status} here`,
         );
+        continue;
+      }
+
+      const listedAmount = Money.fromMoneyLike(item.amount);
+      if (listedAmount.minorUnits !== existing.reservedAmountMinor) {
+        // Leaving the row on a different figure than the balance was rebuilt
+        // from would make a later release subtract more than is reserved, and
+        // the database would reject it with the reservation stuck open.
+        await this.correctReservationAmount(
+          manager,
+          program,
+          existing,
+          listedAmount,
+          asOf,
+          correlationId,
+          snapshot,
+        );
       }
     }
 
@@ -227,6 +271,46 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
       asOf,
       correlationId,
       snapshot,
+    );
+  }
+
+  /** Moves an open row onto the figure treasury reports for it. */
+  private async correctReservationAmount(
+    manager: EntityManager,
+    program: ProgramEntity,
+    reservation: InvoiceReservationEntity,
+    listedAmount: Money,
+    asOf: Date,
+    correlationId: string,
+    snapshot: TreasuryReconciliationDto,
+  ): Promise<void> {
+    const previous = reservation.reservedAmount;
+
+    reservation.invoiceAmountMinor = listedAmount.minorUnits;
+    reservation.invoiceCurrency = program.currency;
+    reservation.reservedAmountMinor = listedAmount.minorUnits;
+    reservation.fxRate = '1';
+    reservation.fxRateSource = 'RECONCILIATION';
+    reservation.fxRateAt = asOf;
+    await manager.save(InvoiceReservationEntity, reservation);
+
+    await this.ledger.append(manager, {
+      program,
+      entryType: LedgerEntryType.ReconciliationAdjustment,
+      source: LedgerEntrySource.TreasuryReconciliation,
+      actor: TREASURY_ACTOR,
+      reservedDelta: 0n,
+      reservationId: reservation.id,
+      correlationId,
+      occurredAt: asOf,
+      reason:
+        `Snapshot ${snapshot.sequence} restated invoice ${reservation.invoiceId} from ` +
+        `${previous.toDecimalString()} to ${listedAmount.toDecimalString()}`,
+    });
+
+    this.logger.warn(
+      `Snapshot ${snapshot.sequence} restated invoice ${reservation.invoiceId}: ` +
+        `${previous.toDecimalString()} -> ${listedAmount.toDecimalString()}`,
     );
   }
 
@@ -355,23 +439,60 @@ export class TreasuryReconciliationHandler implements KafkaMessageHandler, OnMod
     return { opened: BigInt(opened?.total ?? 0), closed: BigInt(closed?.total ?? 0) };
   }
 
-  /** A snapshot whose detail disagrees with its own total is worth knowing about. */
-  private warnOnInconsistentSnapshot(
+  /**
+   * A snapshot carrying detail must agree with itself.
+   *
+   * The rows are rebuilt from `openReservations` and the balance is checked
+   * against `reservedTotal`. If those two disagree the message contains two
+   * different claims about the same thing, and applying either one leaves the
+   * program in a state the producer never described. That is a producer bug, so
+   * it is parked rather than half-applied.
+   */
+  private assertSnapshotIsConsistent(
     snapshot: TreasuryReconciliationDto,
     reservedTotal: Money,
   ): void {
-    if (!snapshot.openReservations?.length) return;
+    const listed = snapshot.openReservations;
+    if (listed === undefined) return;
 
-    const sum = snapshot.openReservations.reduce(
+    const violations: string[] = [];
+
+    const seen = new Set<string>();
+    for (const item of listed) {
+      if (seen.has(item.invoiceId)) {
+        violations.push(`openReservations lists invoice ${item.invoiceId} more than once`);
+      }
+      seen.add(item.invoiceId);
+    }
+
+    const sum = listed.reduce(
       (total, item) => total + MoneyDto.toMoney(item.amount).minorUnits,
       0n,
     );
 
     if (sum !== reservedTotal.minorUnits) {
-      this.logger.warn(
-        `Snapshot ${snapshot.sequence} for ${snapshot.programCode} lists ${sum} minor units of ` +
-          `open reservations but reports a total of ${reservedTotal.minorUnits}; using the reported total`,
+      violations.push(
+        `openReservations sum to ${sum} minor units but reservedTotal is ${reservedTotal.minorUnits}`,
       );
     }
+
+    if (violations.length > 0) {
+      throw new MalformedMessageError(this.topic, violations);
+    }
+  }
+
+  /** Sums everything still held open for the program. */
+  private async openReservationsTotal(
+    manager: EntityManager,
+    program: ProgramEntity,
+  ): Promise<bigint> {
+    const row = await manager
+      .createQueryBuilder(InvoiceReservationEntity, 'reservation')
+      .select('COALESCE(SUM(reservation.reserved_amount_minor), 0)', 'total')
+      .where('reservation.program_id = :programId', { programId: program.id })
+      .andWhere('reservation.status = :status', { status: ReservationStatus.Reserved })
+      .getRawOne<{ total: string }>();
+
+    return BigInt(row?.total ?? 0);
   }
 }

@@ -14,6 +14,7 @@ import {
 import { LedgerEntrySource, LedgerEntryType } from '../../ledger/capacity-ledger-entry.entity';
 import { TREASURY_ACTOR } from '../../ledger/ledger-actor';
 import { LedgerService } from '../../ledger/ledger.service';
+import { MetricsService } from '../../metrics/metrics.service';
 import { OutboxService } from '../../outbox/outbox.service';
 import {
   CAPACITY_CHANGED_EVENT_TYPE,
@@ -54,6 +55,7 @@ export class TreasuryEventsHandler implements KafkaMessageHandler, OnModuleInit 
     private readonly ledger: LedgerService,
     private readonly outbox: OutboxService,
     private readonly capacityEvents: CapacityEventsService,
+    private readonly metrics: MetricsService,
     @Inject(kafkaConfig.KEY) private readonly config: ConfigType<typeof kafkaConfig>,
   ) {
     this.topic = config.topics.treasuryEvents;
@@ -101,6 +103,7 @@ export class TreasuryEventsHandler implements KafkaMessageHandler, OnModuleInit 
           source: ReservationSource.Treasury,
           ledgerSource: LedgerEntrySource.TreasuryEvent,
           actor: TREASURY_ACTOR,
+          allowOvercommit: true,
           externalReference: payload.externalReference ?? null,
           correlationId,
           occurredAt,
@@ -119,6 +122,7 @@ export class TreasuryEventsHandler implements KafkaMessageHandler, OnModuleInit 
             reservationRef: payload.invoiceId,
             ledgerSource: LedgerEntrySource.TreasuryEvent,
             actor: TREASURY_ACTOR,
+            allowAlreadyClosed: true,
             correlationId,
             occurredAt,
             reason: payload.reason ?? 'Released by the treasury system',
@@ -166,7 +170,10 @@ export class TreasuryEventsHandler implements KafkaMessageHandler, OnModuleInit 
           payload: changed,
         });
 
-        return () => this.capacityEvents.publish(changed);
+        return () => {
+          this.metrics.recordCapacity(program);
+          this.capacityEvents.publish(changed);
+        };
       }
     }
   }

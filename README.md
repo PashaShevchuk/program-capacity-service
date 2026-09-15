@@ -255,13 +255,17 @@ message id behind it. Nothing updates or deletes rows there.
 
 `openReservations` is optional and quoted in the program's own currency. Leaving
 it out means the snapshot says nothing about individual rows; sending it empty
-means treasury holds nothing open, and local treasury rows are closed. If its
-sum disagrees with `reservedTotal`, the mismatch is logged and the reported
-total wins.
+means treasury holds nothing open, and local treasury rows are closed. When it
+is present it must list each invoice once and sum to `reservedTotal` — a
+snapshot that contradicts itself is parked in the DLQ rather than half-applied.
 
 **`program.capacity.changed.v1`** (published) — keyed by program id, carrying
 the new limit, reserved and available amounts, the program `version` and the
-reason. Failed messages go to `<topic>.dlq`.
+reason.
+
+Consumed messages that cannot be applied go to `<topic>.dlq`. Outbound events
+are different: they sit in `outbox_messages` until they are published, and a row
+that exhausts its retries is marked `FAILED` and left for an operator.
 
 ## Tests
 
@@ -271,10 +275,10 @@ npm run test:integration   # starts a PostgreSQL container per suite
 npm test                   # both
 ```
 
-99 tests. Unit tests cover money arithmetic and precision, currency conversion
-and rounding, the reservation state machine, the reconciliation arithmetic, and
-the rule that a message which cannot be parked in the DLQ must not have its
-offset committed.
+116 tests. Unit tests cover money arithmetic and precision, currency conversion
+and rounding, the reservation state machine, the reconciliation arithmetic
+including its safety floor, and the rule that a message which cannot be parked
+in the DLQ must not have its offset committed.
 
 Four integration suites cover what unit tests cannot prove, on a real database:
 
@@ -303,7 +307,9 @@ There is no test against a live broker: handlers are driven through
 - `GET /healthz` — liveness, touches nothing
 - `GET /readyz` — readiness, pings the database
 - `GET /metrics` — Prometheus: reservation outcomes, available capacity and
-  utilisation per program, Kafka message outcomes and processing time
+  utilisation per program, Kafka message outcomes and processing time. The
+  per-program gauges appear once that program's capacity first moves, and
+  utilisation can exceed 1 if treasury reports an overcommitted program
 - JSON logs with a request id on every line, taken from `x-request-id`. The same
   id lands on ledger entries, so a capacity movement traces back to the request
   that caused it. Authorization headers and passwords are redacted.

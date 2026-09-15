@@ -384,6 +384,56 @@ describe('treasury messages', () => {
       ).rejects.toThrow(MalformedMessageError);
     });
 
+    it('restates an open reservation whose amount treasury disagrees with', async () => {
+      await consumer.processMessage(
+        message(
+          RECONCILIATION_TOPIC,
+          snapshot({
+            reservedTotal: { amount: '100000.00', currency: 'USD' },
+            openReservations: [
+              { invoiceId: 'INV-AMT', amount: { amount: '100000.00', currency: 'USD' } },
+            ],
+          }),
+        ),
+      );
+
+      await consumer.processMessage(
+        message(
+          RECONCILIATION_TOPIC,
+          snapshot({
+            sequence: 101,
+            reservedTotal: { amount: '80000.00', currency: 'USD' },
+            openReservations: [
+              { invoiceId: 'INV-AMT', amount: { amount: '80000.00', currency: 'USD' } },
+            ],
+          }),
+        ),
+      );
+
+      const row = await context.dataSource
+        .getRepository(InvoiceReservationEntity)
+        .findOneByOrFail({ invoiceId: 'INV-AMT' });
+
+      // Leaving the row at 100,000 while the balance said 80,000 made a later
+      // release drive the reserved total negative and fail.
+      expect(row.reservedAmount.toDecimalString()).toBe('80000.00');
+      expect((await program()).reserved.toDecimalString()).toBe('80000.00');
+    });
+
+    it('rejects a snapshot dated in the future', async () => {
+      await expect(
+        consumer.processMessage(
+          message(
+            RECONCILIATION_TOPIC,
+            snapshot({ asOf: new Date(Date.now() + 86_400_000).toISOString() }),
+          ),
+        ),
+      ).rejects.toThrow(MalformedMessageError);
+
+      // A future watermark would have made every later snapshot look stale.
+      expect((await program()).lastReconciledAt).toBeNull();
+    });
+
     it('rejects a snapshot in the wrong currency', async () => {
       await expect(
         consumer.processMessage(
@@ -465,6 +515,65 @@ describe('treasury messages', () => {
       );
 
       expect((await program()).totalLimit.toDecimalString()).toBe('3000000.00');
+    });
+
+    it('accepts a treasury reserve that takes the program over its limit', async () => {
+      // Treasury reports what already happened at the source of truth.
+      // Refusing it would leave the two permanently out of step.
+      await consumer.processMessage(
+        message(
+          EVENTS_TOPIC,
+          event('CapacityReserved', {
+            invoiceId: 'INV-OVER',
+            amount: { amount: '5000000.00', currency: 'USD' },
+          }),
+        ),
+      );
+
+      const over = await program();
+
+      expect(over.reserved.toDecimalString()).toBe('5000000.00');
+      expect(over.isOvercommitted).toBe(true);
+    });
+
+    it('accepts a release for a reservation reconciliation already closed', async () => {
+      const earlier = new Date(Date.now() - 120_000);
+
+      await consumer.processMessage(
+        message(
+          EVENTS_TOPIC,
+          event(
+            'CapacityReserved',
+            { invoiceId: 'INV-CLOSED', amount: { amount: '1000.00', currency: 'USD' } },
+            3,
+          ),
+        ),
+      );
+      await context.dataSource
+        .getRepository(InvoiceReservationEntity)
+        .update({ invoiceId: 'INV-CLOSED' }, { reservedAt: earlier });
+
+      // A snapshot drops it, so reconciliation cancels the row.
+      await consumer.processMessage(
+        message(RECONCILIATION_TOPIC, {
+          eventId: randomUUID(),
+          programCode: 'PRG-T',
+          sequence: 50,
+          occurredAt: new Date().toISOString(),
+          asOf: new Date().toISOString(),
+          totalLimit: { amount: '1000000.00', currency: 'USD' },
+          reservedTotal: { amount: '0.00', currency: 'USD' },
+          openReservations: [],
+        }),
+      );
+
+      // Treasury then reports the release it had already applied. Before, this
+      // was an invalid transition and went to the DLQ.
+      await expect(
+        consumer.processMessage(
+          message(EVENTS_TOPIC, event('CapacityReleased', { invoiceId: 'INV-CLOSED' }, 51)),
+        ),
+      ).resolves.toBe(true);
     });
 
     it('treats a malformed payload as permanently broken', async () => {

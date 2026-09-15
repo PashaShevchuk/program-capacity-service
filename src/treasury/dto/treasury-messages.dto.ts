@@ -1,15 +1,15 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsEnum,
   IsISO8601,
-  IsInt,
   IsNotEmpty,
   IsObject,
   IsOptional,
   IsString,
   IsUUID,
-  Min,
+  Matches,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 
@@ -28,16 +28,19 @@ export abstract class TreasuryEnvelopeDto {
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(64)
   programCode: string;
 
   /**
    * Monotonic per program. Lets the service ignore a message that arrives after
    * a newer one, which Kafka allows across partitions.
+   *
+   * Carried as a string as well as a number: the column is a `bigint`, and a
+   * JSON number loses precision past 2^53. `BigInt(sequence)` reads either.
    */
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  sequence: number;
+  @Matches(/^\d{1,19}$/, { message: 'sequence must be a non-negative integer' })
+  @Transform(({ value }: { value: unknown }) => String(value))
+  sequence: string;
 
   @IsISO8601()
   occurredAt: string;
@@ -54,6 +57,7 @@ export class TreasuryEventDto extends TreasuryEnvelopeDto {
 export class CapacityReservedPayloadDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(128)
   invoiceId: string;
 
   @ValidateNested()
@@ -62,16 +66,19 @@ export class CapacityReservedPayloadDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(128)
   externalReference?: string;
 }
 
 export class CapacityReleasedPayloadDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(128)
   invoiceId: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   reason?: string;
 }
 
@@ -84,6 +91,7 @@ export class ProgramLimitChangedPayloadDto {
 export class OpenReservationDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(128)
   invoiceId: string;
 
   @ValidateNested()
@@ -108,7 +116,12 @@ export class TreasuryReconciliationDto extends TreasuryEnvelopeDto {
   @Type(() => NonNegativeMoneyDto)
   reservedTotal: NonNegativeMoneyDto;
 
-  /** Optional detail, used only to cross-check `reservedTotal`. */
+  /**
+   * The reservations treasury holds open, quoted in the program's currency.
+   * Omitted means the snapshot says nothing about individual rows; an empty
+   * array means treasury holds none. When present it must sum to
+   * `reservedTotal`, and the rows are rebuilt from it.
+   */
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
