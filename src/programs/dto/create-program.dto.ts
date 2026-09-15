@@ -1,7 +1,15 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsNotEmpty, IsString, Matches, MaxLength, ValidateNested } from 'class-validator';
+import {
+  IsDefined,
+  IsNotEmpty,
+  IsString,
+  Matches,
+  MaxLength,
+  ValidateNested,
+} from 'class-validator';
 
+import { PRINTABLE_MESSAGE, PRINTABLE_TEXT } from '../../common/http/text.patterns';
 import { NonNegativeMoneyDto } from '../../common/money/constrained-money.dto';
 
 export class CreateProgramDto {
@@ -18,12 +26,15 @@ export class CreateProgramDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(200)
+  @Matches(PRINTABLE_TEXT, { message: `name ${PRINTABLE_MESSAGE}` })
   name: string;
 
   @ApiProperty({
     type: NonNegativeMoneyDto,
     description: "Sets both the limit and the program's currency",
   })
+  @IsDefined()
+  @IsDefined()
   @ValidateNested()
   @Type(() => NonNegativeMoneyDto)
   totalLimit: NonNegativeMoneyDto;

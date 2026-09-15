@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsDefined,
   IsEnum,
   IsISO8601,
   IsNotEmpty,
@@ -9,6 +10,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
   Validate,
   ValidateNested,
@@ -16,6 +18,7 @@ import {
   type ValidatorConstraintInterface,
 } from 'class-validator';
 
+import { PRINTABLE_MESSAGE, PRINTABLE_TEXT } from '../../common/http/text.patterns';
 import { NonNegativeMoneyDto, PositiveMoneyDto } from '../../common/money/constrained-money.dto';
 
 /** Cap on how many reservations one snapshot may carry. */
@@ -55,6 +58,7 @@ export abstract class TreasuryEnvelopeDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(64)
+  @Matches(PRINTABLE_TEXT, { message: `programCode ${PRINTABLE_MESSAGE}` })
   programCode: string;
 
   /**
@@ -85,8 +89,10 @@ export class CapacityReservedPayloadDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(128)
+  @Matches(PRINTABLE_TEXT, { message: `invoiceId ${PRINTABLE_MESSAGE}` })
   invoiceId: string;
 
+  @IsDefined()
   @ValidateNested()
   @Type(() => PositiveMoneyDto)
   amount: PositiveMoneyDto;
@@ -94,6 +100,7 @@ export class CapacityReservedPayloadDto {
   @IsOptional()
   @IsString()
   @MaxLength(128)
+  @Matches(PRINTABLE_TEXT, { message: `externalReference ${PRINTABLE_MESSAGE}` })
   externalReference?: string;
 }
 
@@ -101,15 +108,18 @@ export class CapacityReleasedPayloadDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(128)
+  @Matches(PRINTABLE_TEXT, { message: `invoiceId ${PRINTABLE_MESSAGE}` })
   invoiceId: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(500)
+  @Matches(PRINTABLE_TEXT, { message: `reason ${PRINTABLE_MESSAGE}` })
   reason?: string;
 }
 
 export class ProgramLimitChangedPayloadDto {
+  @IsDefined()
   @ValidateNested()
   @Type(() => NonNegativeMoneyDto)
   totalLimit: NonNegativeMoneyDto;
@@ -119,8 +129,10 @@ export class OpenReservationDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(128)
+  @Matches(PRINTABLE_TEXT, { message: `invoiceId ${PRINTABLE_MESSAGE}` })
   invoiceId: string;
 
+  @IsDefined()
   @ValidateNested()
   @Type(() => PositiveMoneyDto)
   amount: PositiveMoneyDto;
@@ -135,10 +147,12 @@ export class TreasuryReconciliationDto extends TreasuryEnvelopeDto {
   @IsISO8601()
   asOf: string;
 
+  @IsDefined()
   @ValidateNested()
   @Type(() => NonNegativeMoneyDto)
   totalLimit: NonNegativeMoneyDto;
 
+  @IsDefined()
   @ValidateNested()
   @Type(() => NonNegativeMoneyDto)
   reservedTotal: NonNegativeMoneyDto;
