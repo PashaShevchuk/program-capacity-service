@@ -10,9 +10,3 @@ export const bigintTransformer: ValueTransformer = {
   from: (value?: string | number | null): bigint | null =>
     value === null || value === undefined ? null : BigInt(value),
 };
-
-/** Keeps `numeric` columns (FX rates) as strings; `Decimal` does the arithmetic. */
-export const numericStringTransformer: ValueTransformer = {
-  to: (value?: string | null): string | null => value ?? null,
-  from: (value?: string | null): string | null => value ?? null,
-};

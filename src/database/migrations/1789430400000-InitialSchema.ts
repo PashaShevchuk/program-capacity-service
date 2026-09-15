@@ -8,6 +8,14 @@ import { type MigrationInterface, type QueryRunner } from 'typeorm';
  * total_limit_minor` is deliberately not a constraint: treasury can legitimately
  * report an overcommitted program, and rejecting that snapshot would leave us
  * permanently out of sync. `ProgramEntity.isOvercommitted` surfaces it instead.
+ *
+ * The two columns that lists are paged by, `capacity_ledger_entries.created_at`
+ * and `invoice_reservations.reserved_at`, are `timestamptz(3)`. PostgreSQL keeps
+ * microseconds by default and a JavaScript `Date` cannot, so a cursor built from
+ * a value the service had read would fall just short of the row it came from and
+ * skip every row whose microseconds were not zero. Their indexes cover
+ * `(program_id, timestamp DESC, id DESC)`, which is the row value the cursor
+ * compares, so paging seeks instead of sorting.
  */
 export class InitialSchema1789430400000 implements MigrationInterface {
   name = 'InitialSchema1789430400000';
@@ -73,7 +81,7 @@ export class InitialSchema1789430400000 implements MigrationInterface {
         "idempotency_key" varchar(128),
         "request_fingerprint" varchar(64),
         "external_reference" varchar(128),
-        "reserved_at" timestamptz NOT NULL,
+        "reserved_at" timestamptz(3) NOT NULL,
         "released_at" timestamptz,
         "cancelled_at" timestamptz,
         "metadata" jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -108,8 +116,8 @@ export class InitialSchema1789430400000 implements MigrationInterface {
         ON "invoice_reservations" ("program_id", "status")
     `);
     await queryRunner.query(`
-      CREATE INDEX "idx_invoice_reservations_reserved_at"
-        ON "invoice_reservations" ("reserved_at")
+      CREATE INDEX "idx_invoice_reservations_program_keyset"
+        ON "invoice_reservations" ("program_id", "reserved_at" DESC, "id" DESC)
     `);
 
     // --- capacity ledger ----------------------------------------------------
@@ -129,7 +137,7 @@ export class InitialSchema1789430400000 implements MigrationInterface {
         "correlation_id" varchar(128),
         "occurred_at" timestamptz NOT NULL,
         "metadata" jsonb NOT NULL DEFAULT '{}'::jsonb,
-        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "created_at" timestamptz(3) NOT NULL DEFAULT now(),
         CONSTRAINT "pk_capacity_ledger_entries" PRIMARY KEY ("id"),
         CONSTRAINT "fk_ledger_program" FOREIGN KEY ("program_id")
           REFERENCES "programs" ("id") ON DELETE RESTRICT,
@@ -142,8 +150,8 @@ export class InitialSchema1789430400000 implements MigrationInterface {
       )
     `);
     await queryRunner.query(`
-      CREATE INDEX "idx_ledger_program_created"
-        ON "capacity_ledger_entries" ("program_id", "created_at" DESC)
+      CREATE INDEX "idx_ledger_program_keyset"
+        ON "capacity_ledger_entries" ("program_id", "created_at" DESC, "id" DESC)
     `);
     await queryRunner.query(
       `CREATE INDEX "idx_ledger_reservation" ON "capacity_ledger_entries" ("reservation_id")`,

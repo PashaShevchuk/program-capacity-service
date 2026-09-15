@@ -24,8 +24,6 @@ export class Money {
     readonly currency: CurrencyCode,
   ) {}
 
-  // --- construction ---------------------------------------------------------
-
   /** Builds from minor units: 1050n is USD 10.50. */
   static fromMinorUnits(minorUnits: bigint | number | string, currency: string): Money {
     const code = toCurrencyCode(currency);

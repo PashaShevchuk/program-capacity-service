@@ -28,6 +28,8 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../auth/user.entity';
 import { CorrelationId } from '../common/http/correlation-id.decorator';
 import { MoneyDto } from '../common/money/money.dto';
+import { ApiCursorPage, ApiOffsetPage } from '../common/pagination/api-page.decorator';
+import { CursorPageDto, CursorQueryDto } from '../common/pagination/cursor-pagination.dto';
 import { PageDto, PaginationQueryDto } from '../common/pagination/pagination.dto';
 import { userActor } from '../ledger/ledger-actor';
 import { LedgerEntryDto } from '../ledger/dto/ledger-entry.dto';
@@ -51,7 +53,7 @@ export class ProgramsController {
 
   @Get()
   @ApiOperation({ summary: 'List financing programs' })
-  @ApiOkResponse({ type: PageDto<ProgramDto> })
+  @ApiOffsetPage(ProgramDto)
   async list(@Query() query: PaginationQueryDto): Promise<PageDto<ProgramDto>> {
     const page = await this.programs.list(query);
 
@@ -138,18 +140,14 @@ export class ProgramsController {
 
   @Get(':programRef/ledger')
   @ApiParam({ name: 'programRef', description: PROGRAM_REF })
-  @ApiOperation({ summary: 'Audit trail of capacity movements' })
-  @ApiOkResponse({ type: PageDto<LedgerEntryDto> })
+  @ApiOperation({ summary: 'Audit trail of capacity movements, newest first' })
+  @ApiCursorPage(LedgerEntryDto)
   async ledger(
     @Param('programRef') programRef: string,
-    @Query() query: PaginationQueryDto,
-  ): Promise<PageDto<LedgerEntryDto>> {
+    @Query() query: CursorQueryDto,
+  ): Promise<CursorPageDto<LedgerEntryDto>> {
     const page = await this.programs.ledgerEntries(programRef, query);
 
-    return PageDto.of(
-      page.items.map((entry) => LedgerEntryDto.from(entry)),
-      page.total,
-      query,
-    );
+    return { ...page, items: page.items.map((entry) => LedgerEntryDto.from(entry)) };
   }
 }

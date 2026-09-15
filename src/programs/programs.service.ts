@@ -8,6 +8,12 @@ import {
   ProgramLimitBelowReservedError,
 } from '../common/errors/domain.errors';
 import { type Money } from '../common/money/money';
+import {
+  buildCursorPage,
+  type CursorPageDto,
+  type CursorQueryDto,
+} from '../common/pagination/cursor-pagination.dto';
+import { applyKeyset } from '../common/pagination/keyset';
 import { PageDto, type PaginationQueryDto } from '../common/pagination/pagination.dto';
 import { kafkaConfig } from '../config/configuration';
 import { isUniqueViolation } from '../database/postgres-errors';
@@ -67,20 +73,24 @@ export class ProgramsService {
     return this.capacity.findProgram(this.dataSource.manager, reference);
   }
 
+  /**
+   * The audit trail, newest first. Cursor-paged: the ledger is append-only, so
+   * offsets would shift under a client that reads while the service writes.
+   */
   async ledgerEntries(
     reference: string,
-    query: PaginationQueryDto,
-  ): Promise<PageDto<CapacityLedgerEntryEntity>> {
+    query: CursorQueryDto,
+  ): Promise<CursorPageDto<CapacityLedgerEntryEntity>> {
     const program = await this.findOne(reference);
 
-    const [items, total] = await this.dataSource.manager.findAndCount(CapacityLedgerEntryEntity, {
-      where: { programId: program.id },
-      order: { createdAt: 'DESC' },
-      skip: query.skip,
-      take: query.pageSize,
-    });
+    const rows = await applyKeyset(
+      this.dataSource.manager
+        .createQueryBuilder(CapacityLedgerEntryEntity, 'entry')
+        .where('entry.program_id = :programId', { programId: program.id }),
+      { alias: 'entry', timestampColumn: 'created_at', limit: query.limit, cursor: query.cursor },
+    ).getMany();
 
-    return PageDto.of(items, total, query);
+    return buildCursorPage(rows, query.limit, (entry) => entry.createdAt);
   }
 
   /** Creates a program and opens its ledger with the initial limit. */

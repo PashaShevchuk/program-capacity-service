@@ -132,6 +132,22 @@ admin endpoint to replay them; that would be worth adding.
 defaults.** All are deployment concerns here rather than service concerns, but
 they would need to be decided before this went live.
 
+## Pagination
+
+**Two styles on purpose.** `/programs` uses offset paging; the ledger and the
+reservation list use a cursor. Offsets are fine for a short list with a unique
+sort key and wrong for a list that grows at the head while a client reads it.
+
+**Cursor responses carry no total.** Avoiding `COUNT(*)` on an unbounded table is
+most of the reason to use a cursor at all. A client that needs an exact count
+would need a separate endpoint, and for an audit trail that is rarely the
+question being asked.
+
+**Cursors are opaque but not signed.** They encode a timestamp and an id in
+base64. A caller could craft one and read from an arbitrary point in a list they
+already have access to, which is not a privilege escalation. If cursors ever
+carried filter state, they would need signing.
+
 ## Testing
 
 **No test against a live broker.** Handlers are driven through

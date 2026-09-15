@@ -64,8 +64,8 @@ Content-Type: application/json
   "amount": { "amount": "50000000.00", "currency": "USD" }
 }
 
-### List reservations
-GET {{host}}/v1/programs/{{program}}/reservations?page=1&pageSize=20
+### List reservations (cursor-paged, newest first)
+GET {{host}}/v1/programs/{{program}}/reservations?limit=20
 Authorization: Bearer {{token}}
 
 ### Release after repayment
@@ -82,8 +82,13 @@ Content-Type: application/json
 
 { "reason": "Approval withdrawn" }
 
-### Audit trail
-GET {{host}}/v1/programs/{{program}}/ledger?pageSize=20
+### Audit trail (cursor-paged, newest first)
+# @name ledger
+GET {{host}}/v1/programs/{{program}}/ledger?limit=5
+Authorization: Bearer {{token}}
+
+### Next page, using the cursor from the previous response
+GET {{host}}/v1/programs/{{program}}/ledger?limit=5&cursor={{ledger.response.body.nextCursor}}
 Authorization: Bearer {{token}}
 
 ### Raise the credit limit (admin only)

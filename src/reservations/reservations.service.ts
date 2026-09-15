@@ -11,7 +11,12 @@ import {
   ReservationNotFoundError,
 } from '../common/errors/domain.errors';
 import { type Money } from '../common/money/money';
-import { PageDto, type PaginationQueryDto } from '../common/pagination/pagination.dto';
+import {
+  buildCursorPage,
+  type CursorPageDto,
+  type CursorQueryDto,
+} from '../common/pagination/cursor-pagination.dto';
+import { applyKeyset } from '../common/pagination/keyset';
 import { kafkaConfig } from '../config/configuration';
 import { isUniqueViolation } from '../database/postgres-errors';
 import { type ConversionResult } from '../fx/currency-converter';
@@ -64,18 +69,23 @@ export class ReservationsService {
 
   async list(
     programRef: string,
-    query: PaginationQueryDto,
-  ): Promise<PageDto<InvoiceReservationEntity>> {
+    query: CursorQueryDto,
+  ): Promise<CursorPageDto<InvoiceReservationEntity>> {
     const program = await this.programs.findProgram(this.dataSource.manager, programRef);
 
-    const [items, total] = await this.dataSource.manager.findAndCount(InvoiceReservationEntity, {
-      where: { programId: program.id },
-      order: { reservedAt: 'DESC' },
-      skip: query.skip,
-      take: query.pageSize,
-    });
+    const rows = await applyKeyset(
+      this.dataSource.manager
+        .createQueryBuilder(InvoiceReservationEntity, 'reservation')
+        .where('reservation.program_id = :programId', { programId: program.id }),
+      {
+        alias: 'reservation',
+        timestampColumn: 'reserved_at',
+        limit: query.limit,
+        cursor: query.cursor,
+      },
+    ).getMany();
 
-    return PageDto.of(items, total, query);
+    return buildCursorPage(rows, query.limit, (reservation) => reservation.reservedAt);
   }
 
   async findOne(programRef: string, reservationRef: string): Promise<InvoiceReservationEntity> {

@@ -89,9 +89,9 @@ Everything under `/v1` needs a bearer token. `/healthz`, `/readyz` and
 | `GET` | `/v1/programs/:ref/capacity` | any | limit, reserved, available |
 | `GET` | `/v1/programs/:ref/capacity/stream` | any | server-sent stream of changes |
 | `PATCH` | `/v1/programs/:ref/limit` | admin | change the credit limit |
-| `GET` | `/v1/programs/:ref/ledger` | any | audit trail |
+| `GET` | `/v1/programs/:ref/ledger` | any | audit trail, cursor-paged |
 | `POST` | `/v1/programs/:ref/reservations` | client, admin | reserve for an approved invoice |
-| `GET` | `/v1/programs/:ref/reservations` | any | list reservations |
+| `GET` | `/v1/programs/:ref/reservations` | any | list reservations, cursor-paged |
 | `GET` | `/v1/programs/:ref/reservations/:ref` | any | one reservation |
 | `POST` | `/v1/programs/:ref/reservations/:ref/release` | client, admin | release after repayment |
 | `POST` | `/v1/programs/:ref/reservations/:ref/cancel` | client, admin | withdraw a reservation |
@@ -219,6 +219,36 @@ window where capacity changed but the event vanished, or the reverse. Instead
 the event is written to `outbox_messages` in the same transaction, and a
 background publisher claims rows with `FOR UPDATE SKIP LOCKED` and sends them.
 Delivery is at least once, and consumers deduplicate on `eventId`.
+
+### Paging a list that grows while you read it
+
+`/programs` is offset-paged: it is short, rarely changes, and sorts by a unique
+code, so "rows 50 to 99" means something.
+
+The ledger and the reservation list are not like that. Both are read newest
+first and both grow at the head, so an offset is wrong twice over. Rows shift
+down as new ones are written, and a client paging through silently misses
+entries. And the sort timestamps are not unique — concurrent writes land in the
+same millisecond, which leaves the database free to return tied rows in any
+order, so pages can overlap even with nothing being written.
+
+Both use a cursor instead. The comparison is on the row value
+`(timestamp, id)`, with the id breaking every tie:
+
+```sql
+WHERE program_id = $1 AND (created_at, id) < ($2, $3)
+ORDER BY created_at DESC, id DESC
+LIMIT $4
+```
+
+The response carries `nextCursor` and `hasMore` rather than a total; dropping
+`COUNT(*)` on a table that grows without bound is half the point.
+
+One detail worth knowing, because the first version got it wrong and a test
+caught it: these timestamps are stored as `timestamptz(3)`. PostgreSQL keeps
+microseconds by default, a JavaScript `Date` cannot, and a cursor built from the
+truncated value skipped every row whose microseconds were not zero. Storing the
+precision the application can represent removes the mismatch.
 
 ### Everything that moves is auditable
 

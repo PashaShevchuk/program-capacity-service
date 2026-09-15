@@ -31,7 +31,7 @@ export enum LedgerEntrySource {
  * can be read from one row, and drift against `programs.reserved_minor` shows up.
  */
 @Entity('capacity_ledger_entries')
-@Index('idx_ledger_program_created', ['programId', 'createdAt'])
+@Index('idx_ledger_program_keyset', ['programId', 'createdAt', 'id'])
 @Index('idx_ledger_reservation', ['reservationId'])
 export class CapacityLedgerEntryEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -99,7 +99,7 @@ export class CapacityLedgerEntryEntity {
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   metadata: Record<string, unknown>;
 
-  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz', precision: 3 })
   createdAt: Date;
 
   get reservedDelta(): Money {

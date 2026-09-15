@@ -25,7 +25,7 @@ export type CurrencyCode = keyof typeof CURRENCY_EXPONENTS;
 export const SUPPORTED_CURRENCIES = Object.keys(CURRENCY_EXPONENTS) as CurrencyCode[];
 
 export function isCurrencyCode(value: string): value is CurrencyCode {
-  return Object.prototype.hasOwnProperty.call(CURRENCY_EXPONENTS, value);
+  return Object.hasOwn(CURRENCY_EXPONENTS, value);
 }
 
 /** Validates a currency code and normalises its case. */

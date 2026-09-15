@@ -49,7 +49,7 @@ export const ALLOWED_RESERVATION_TRANSITIONS: Readonly<
 @Entity('invoice_reservations')
 @Index('uq_invoice_reservations_program_invoice', ['programId', 'invoiceId'], { unique: true })
 @Index('idx_invoice_reservations_program_status', ['programId', 'status'])
-@Index('idx_invoice_reservations_reserved_at', ['reservedAt'])
+@Index('idx_invoice_reservations_program_keyset', ['programId', 'reservedAt', 'id'])
 export class InvoiceReservationEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -122,7 +122,8 @@ export class InvoiceReservationEntity {
 
   // --- lifecycle timestamps -------------------------------------------------
 
-  @Column({ name: 'reserved_at', type: 'timestamptz' })
+  /** Millisecond precision, so a cursor built from this value is exact. */
+  @Column({ name: 'reserved_at', type: 'timestamptz', precision: 3 })
   reservedAt: Date;
 
   @Column({ name: 'released_at', type: 'timestamptz', nullable: true })

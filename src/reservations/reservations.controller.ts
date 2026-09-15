@@ -31,7 +31,8 @@ import { UserRole } from '../auth/user.entity';
 import { CorrelationId } from '../common/http/correlation-id.decorator';
 import { ProblemDetails } from '../common/http/problem-details';
 import { MoneyDto } from '../common/money/money.dto';
-import { PageDto, PaginationQueryDto } from '../common/pagination/pagination.dto';
+import { ApiCursorPage } from '../common/pagination/api-page.decorator';
+import { CursorPageDto, CursorQueryDto } from '../common/pagination/cursor-pagination.dto';
 import { LedgerEntrySource } from '../ledger/capacity-ledger-entry.entity';
 import { userActor } from '../ledger/ledger-actor';
 import { CloseReservationDto, CreateReservationDto } from './dto/create-reservation.dto';
@@ -90,19 +91,15 @@ export class ReservationsController {
 
   @Get()
   @ApiParam({ name: 'programRef', description: PROGRAM_REF })
-  @ApiOperation({ summary: 'List reservations on a program' })
-  @ApiOkResponse({ type: PageDto<ReservationDto> })
+  @ApiOperation({ summary: 'List reservations on a program, newest first' })
+  @ApiCursorPage(ReservationDto)
   async list(
     @Param('programRef') programRef: string,
-    @Query() query: PaginationQueryDto,
-  ): Promise<PageDto<ReservationDto>> {
+    @Query() query: CursorQueryDto,
+  ): Promise<CursorPageDto<ReservationDto>> {
     const page = await this.reservations.list(programRef, query);
 
-    return PageDto.of(
-      page.items.map((reservation) => ReservationDto.from(reservation)),
-      page.total,
-      query,
-    );
+    return { ...page, items: page.items.map((reservation) => ReservationDto.from(reservation)) };
   }
 
   @Get(':reservationRef')

@@ -56,6 +56,16 @@ export class InvalidAmountError extends ValidationError {
   }
 }
 
+// --- pagination -------------------------------------------------------------
+
+export class InvalidCursorError extends ValidationError {
+  readonly code = 'INVALID_CURSOR';
+
+  constructor() {
+    super('The pagination cursor is not one this endpoint issued');
+  }
+}
+
 // --- messaging --------------------------------------------------------------
 
 export class MalformedMessageError extends ValidationError {

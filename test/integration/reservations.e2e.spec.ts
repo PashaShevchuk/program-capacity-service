@@ -318,7 +318,8 @@ describe('reservations over HTTP', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
 
-      expect(ledger.body.total).toBe(1);
+      expect(ledger.body.items).toHaveLength(1);
+      expect(ledger.body.hasMore).toBe(false);
       expect(ledger.body.items[0].entryType).toBe('LIMIT_CHANGE');
       expect(ledger.body.items[0].limitAfter).toEqual({ amount: '750000.00', currency: 'GBP' });
     });
@@ -369,7 +370,7 @@ describe('reservations over HTTP', () => {
         .set('Authorization', `Bearer ${clientToken}`)
         .expect(200);
 
-      expect(ledger.body.total).toBe(2);
+      expect(ledger.body.items).toHaveLength(2);
       expect(
         ledger.body.items.map((entry: { entryType: string }) => entry.entryType).sort(),
       ).toEqual(['RELEASE', 'RESERVE']);
