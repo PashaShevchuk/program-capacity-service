@@ -266,9 +266,10 @@ npm run test:integration   # starts a PostgreSQL container per suite
 npm test                   # both
 ```
 
-123 tests. Unit tests cover money arithmetic and precision, currency conversion
-and rounding, the reservation state machine, the reconciliation arithmetic, and
-the rule that a message which cannot be parked in the DLQ keeps its offset.
+129 tests. Unit tests cover money arithmetic and precision, currency conversion
+and rounding, the reservation state machine, the reconciliation arithmetic,
+treasury sequence validation down to the value `JSON.parse` has already rounded,
+and the rule that a message which cannot be parked in the DLQ keeps its offset.
 
 Five integration suites cover what unit tests cannot prove, on a real database:
 

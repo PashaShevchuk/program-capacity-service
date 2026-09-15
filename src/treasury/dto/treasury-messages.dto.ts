@@ -1,4 +1,4 @@
-import { Transform, Type } from 'class-transformer';
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -28,9 +28,7 @@ const MAX_SEQUENCE = 9_223_372_036_854_775_807n;
 class IsBigIntSequence implements ValidatorConstraintInterface {
   validate(value: unknown): boolean {
     if (typeof value === 'number') {
-      // JSON.parse has already rounded it, so the original is unrecoverable.
-      if (!Number.isSafeInteger(value) || value < 0) return false;
-      return true;
+      return Number.isSafeInteger(value) && value >= 0;
     }
 
     if (typeof value !== 'string' || !/^\d{1,19}$/.test(value)) return false;
@@ -69,8 +67,7 @@ export abstract class TreasuryEnvelopeDto {
    * producer has to send a string or the value it meant is already lost.
    */
   @Validate(IsBigIntSequence)
-  @Transform(({ value }: { value: unknown }) => String(value))
-  sequence: string;
+  sequence: string | number;
 
   @IsISO8601()
   occurredAt: string;
