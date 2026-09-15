@@ -1,12 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 
-import { toCurrencyCode } from '../common/money/currency';
-import { type Money } from '../common/money/money';
-import {
-  ConversionRounding,
-  convertMoney,
-  type ConversionResult,
-} from './currency-converter';
+import { toCurrencyCode } from '../common/money';
+import { type Money } from '../common/money';
+import { ConversionRounding, convertMoney, type ConversionResult } from './currency-converter';
 import { EXCHANGE_RATE_PROVIDER, type ExchangeRateProvider } from './exchange-rate.types';
 
 /**

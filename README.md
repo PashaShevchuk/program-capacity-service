@@ -132,6 +132,15 @@ The check and the write then happen while no one else can touch that row. The
 update repeats the invariant in its `WHERE` clause as a second line of defence,
 and refuses to continue if it affects no rows.
 
+Two other approaches would also be correct, and were rejected. An atomic
+conditional update — `UPDATE ... SET reserved = reserved + $1 WHERE reserved +
+$1 <= limit` — handles the balance on its own, but a capacity movement also
+writes a reservation, a ledger entry carrying the *resulting* balances, and an
+outbox event; the lock gives all four one consistent view without a second
+read. Optimistic concurrency with a version check works too, but under real
+contention on a single hot program it turns into a retry storm, and the retry
+loop is more code to get wrong than the lock.
+
 Locking per program is the right granularity: programs are independent of each
 other, so this serialises only the approvals for one program. `test/integration/capacity-concurrency.spec.ts`
 fires 50 simultaneous reservations at a limit that fits 33 and asserts that
@@ -344,5 +353,4 @@ why they are the easiest parts to test.
 
 ## Assumptions and trade-offs
 
-See [ASSUMPTIONS.md](ASSUMPTIONS.md) for the full list, and
-[docs/adr](docs/adr) for the reasoning behind the main decisions.
+See [ASSUMPTIONS.md](ASSUMPTIONS.md).

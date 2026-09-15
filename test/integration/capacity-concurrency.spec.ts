@@ -1,5 +1,5 @@
 import { InsufficientCapacityError } from '../../src/common/errors/domain.errors';
-import { Money } from '../../src/common/money/money';
+import { Money } from '../../src/common/money';
 import { LedgerEntrySource, LedgerEntryType } from '../../src/ledger/capacity-ledger-entry.entity';
 import { CapacityLedgerEntryEntity } from '../../src/ledger/capacity-ledger-entry.entity';
 import { ProgramEntity } from '../../src/programs/program.entity';
@@ -7,14 +7,6 @@ import { ReservationSource } from '../../src/reservations/invoice-reservation.en
 import { ReservationsService } from '../../src/reservations/reservations.service';
 import { createTestContext, type TestContext } from '../helpers/test-app';
 
-/**
- * The invariant this whole service exists to keep: however many approvals
- * arrive at once, the sum of reservations never exceeds the credit limit.
- *
- * A unit test cannot show this. Overselling is a property of how the database
- * transaction and the row lock interact, which only appears when real
- * connections race each other.
- */
 describe('concurrent reservations', () => {
   let context: TestContext;
   let reservations: ReservationsService;

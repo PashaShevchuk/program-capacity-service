@@ -9,7 +9,7 @@ import { type CapacityChangedPayload } from './capacity-changed.event';
  * Single-instance only: a client connected to one replica will not see changes
  * applied by another. Making this cluster-wide means subscribing to the
  * `program.capacity.changed` topic the service already publishes, or a Redis
- * pub/sub channel. See ADR-0005.
+ * pub/sub channel.
  */
 @Injectable()
 export class CapacityEventsService {

@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Decimal } from 'decimal.js';
 import { LessThanOrEqual, Repository } from 'typeorm';
 
-import { type CurrencyCode } from '../common/money/currency';
+import { type CurrencyCode } from '../common/money';
 import { ExchangeRateUnavailableError } from '../common/errors/domain.errors';
 import { FxRateEntity } from './fx-rate.entity';
 import { type ExchangeRate, type ExchangeRateProvider } from './exchange-rate.types';
@@ -27,7 +27,11 @@ export class DatabaseExchangeRateProvider implements ExchangeRateProvider {
     private readonly rates: Repository<FxRateEntity>,
   ) {}
 
-  async getRate(base: CurrencyCode, quote: CurrencyCode, at: Date = new Date()): Promise<ExchangeRate> {
+  async getRate(
+    base: CurrencyCode,
+    quote: CurrencyCode,
+    at: Date = new Date(),
+  ): Promise<ExchangeRate> {
     if (base === quote) {
       return { base, quote, rate: '1', asOf: at, source: 'IDENTITY' };
     }
@@ -40,7 +44,9 @@ export class DatabaseExchangeRateProvider implements ExchangeRateProvider {
     // A feed that publishes EUR/USD need not also publish USD/EUR.
     const inverse = await this.findLatest(quote, base, at);
     if (inverse) {
-      const rate = new Decimal(1).dividedBy(new Decimal(inverse.rate)).toFixed(INVERSE_RATE_PRECISION);
+      const rate = new Decimal(1)
+        .dividedBy(new Decimal(inverse.rate))
+        .toFixed(INVERSE_RATE_PRECISION);
 
       this.logger.debug(
         `Derived ${base}/${quote} = ${rate} by inverting ${quote}/${base} = ${inverse.rate}`,

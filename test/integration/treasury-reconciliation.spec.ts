@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { MalformedMessageError } from '../../src/common/errors/domain.errors';
-import { Money } from '../../src/common/money/money';
+import { Money } from '../../src/common/money';
 import { KafkaConsumerService } from '../../src/kafka/kafka-consumer.service';
 import { type ParsedKafkaMessage } from '../../src/kafka/kafka-message';
 import {

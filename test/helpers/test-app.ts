@@ -5,17 +5,20 @@ import * as bcrypt from 'bcryptjs';
 import { DataSource } from 'typeorm';
 
 import { UserEntity, UserRole } from '../../src/auth/user.entity';
-import { Money } from '../../src/common/money/money';
+import { Money } from '../../src/common/money';
 import { FxRateEntity } from '../../src/fx/fx-rate.entity';
 import { ProgramEntity } from '../../src/programs/program.entity';
 
 export interface TestContext {
   app: INestApplication;
   dataSource: DataSource;
+
   close(): Promise<void>;
-  /** Removes all capacity data, leaving users and FX rates in place. */
+
   reset(): Promise<void>;
+
   createProgram(code: string, limit: string, currency: string): Promise<ProgramEntity>;
+
   tokenFor(role: UserRole): Promise<string>;
 }
 
@@ -53,8 +56,7 @@ export async function createTestContext(): Promise<TestContext> {
     OUTBOX_ENABLED: 'false',
   });
 
-  // Imported after the environment is in place: config namespaces read
-  // process.env when the module graph is built.
+  // Imported after the environment is in place: config namespaces read process.env when the module graph is built.
   const { AppModule } = await import('../../src/app.module');
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();

@@ -17,7 +17,7 @@ import { buildDataSourceOptions } from './data-source';
           password: db.password,
           database: db.database,
           // Migrating on boot keeps `docker compose up` a single step. With more
-          // than one replica this belongs in a deploy job instead (ADR-0002).
+          // than one replica this belongs in a deploy job instead.
           migrationsRun: db.runMigrationsOnBoot,
         }),
     }),
